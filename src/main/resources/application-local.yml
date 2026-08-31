@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:jewellery}
+    username: ${DB_USERNAME:jewellery}
+    password: ${DB_PASSWORD:jewellery}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+jewellery:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:local-development-only-secret-key-change-me-please-0123456789}
+
+logging:
+  level:
+    com.finotech.jewellery: DEBUG
+
+server:
+  port: ${SERVER_PORT:8081}

@@ -1,0 +1,33 @@
+package com.finotech.jewellery.modules.sales.api.request;
+
+import com.finotech.jewellery.modules.pricing.domain.enums.DiscountType;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Opens a sale. Each line is priced by the pricing engine at this moment and
+ * the result is frozen onto the sale.
+ */
+public record CreateSaleRequest(@NotNull UUID customerId,
+                                @NotNull UUID branchId,
+                                UUID locationId,
+                                UUID quotationId,
+                                UUID salespersonId,
+                                @DecimalMin("0.0") BigDecimal exchangeCredit,
+                                /** Loyalty points to spend against this sale. */
+                                @PositiveOrZero Long redeemPoints,
+                                @Size(max = 500) String notes,
+                                @NotEmpty @Valid List<Line> lines) {
+
+    public record Line(@NotNull UUID jewelleryItemId,
+                       DiscountType discountType,
+                       @DecimalMin("0.0") BigDecimal discountValue) {
+    }
+}

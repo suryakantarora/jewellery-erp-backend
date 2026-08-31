@@ -1,0 +1,13 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+jewellery:
+  security:
+    jwt:
+      secret: integration-test-secret-key-at-least-32-bytes-long-0123456789
+  bootstrap:
+    admin-password: IntegrationTest123
