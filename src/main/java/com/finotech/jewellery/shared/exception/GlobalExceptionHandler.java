@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -52,6 +53,20 @@ public class GlobalExceptionHandler {
                                                        HttpServletRequest request) {
         String message = "Invalid value for parameter '" + ex.getName() + "'";
         return build(ErrorCode.VALIDATION_FAILED, message, request, null);
+    }
+
+    /**
+     * A missing required query parameter is a caller mistake, not a server
+     * fault. Without this it fell through to the catch-all and returned 500,
+     * which told a client to retry something that could never succeed.
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiError> handleMissingParameter(MissingServletRequestParameterException ex,
+                                                           HttpServletRequest request) {
+        List<ApiError.FieldError> fields =
+                List.of(new ApiError.FieldError(ex.getParameterName(), "Required parameter is missing"));
+        return build(ErrorCode.VALIDATION_FAILED,
+                "Required parameter '" + ex.getParameterName() + "' is missing", request, fields);
     }
 
     @ExceptionHandler(OptimisticLockingFailureException.class)

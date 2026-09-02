@@ -9,6 +9,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
@@ -76,6 +77,19 @@ public class Notification extends BaseEntity {
 
     @Column(name = "failure_reason", length = 500)
     private String failureReason;
+
+    /**
+     * When the <em>current</em> caller read this message.
+     *
+     * <p>Not persisted here: a branch broadcast is one row shared by everyone in
+     * the branch, so read state lives in {@code notification_read}, keyed by
+     * (notification, user). The inbox service fills this in per request.
+     *
+     * <p>Also deliberately separate from {@link #status}: "sent" is a fact about
+     * the dispatcher, "read" is a fact about a person.
+     */
+    @Transient
+    private Instant readAt;
 
     public void markSent() {
         this.status = NotificationStatus.SENT;

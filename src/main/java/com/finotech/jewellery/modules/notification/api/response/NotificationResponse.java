@@ -13,14 +13,14 @@ public record NotificationResponse(UUID id, String eventType, NotificationChanne
                                    String recipientAddress, String subject, String body,
                                    NotificationStatus status, UUID branchId, String referenceType,
                                    String referenceId, int attemptCount, Instant sentAt,
-                                   String failureReason, Instant createdAt) {
+                                   String failureReason, Instant readAt, Instant createdAt) {
 
     public static NotificationResponse from(Notification n) {
         return new NotificationResponse(n.getId(), n.getEventType(), n.getChannel(),
                 n.getRecipientType(), n.getRecipientId(), n.getRecipientAddress(), n.getSubject(),
                 n.getBody(), n.getStatus(), n.getBranchId(), n.getReferenceType(),
                 n.getReferenceId(), n.getAttemptCount(), n.getSentAt(), n.getFailureReason(),
-                n.getCreatedAt());
+                n.getReadAt(), n.getCreatedAt());
     }
 
     public record TemplateResponse(UUID id, String code, String eventType,
