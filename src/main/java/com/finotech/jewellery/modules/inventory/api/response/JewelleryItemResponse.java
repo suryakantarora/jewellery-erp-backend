@@ -1,5 +1,6 @@
 package com.finotech.jewellery.modules.inventory.api.response;
 
+import com.finotech.jewellery.modules.inventory.domain.entity.ItemImage;
 import com.finotech.jewellery.modules.inventory.domain.entity.JewelleryItem;
 import com.finotech.jewellery.modules.inventory.domain.enums.ItemStatus;
 import java.math.BigDecimal;
@@ -17,7 +18,8 @@ public record JewelleryItemResponse(UUID id, String itemCode, UUID productId, UU
                                     BigDecimal makingCost, BigDecimal stoneCost,
                                     BigDecimal totalCost, BigDecimal currentPrice, String currency,
                                     ItemStatus status, Set<ItemStatus> allowedTransitions,
-                                    UUID currentLocationId, UUID currentBranchId,
+                                    UUID currentLocationId, UUID currentBranchId, UUID binId,
+                                    String primaryImageKey,
                                     UUID reservedForCustomerId, Instant reservedUntil,
                                     UUID supplierId, LocalDate receivedDate, LocalDate soldDate,
                                     UUID ownerCustomerId, boolean qualityChecked, String notes,
@@ -30,9 +32,25 @@ public record JewelleryItemResponse(UUID id, String itemCode, UUID productId, UU
                 i.getRfidTag(), i.getQrCode(), i.getBarcode(), i.getHallmarkNumber(),
                 i.getPurchaseCost(), i.getMakingCost(), i.getStoneCost(), i.getTotalCost(),
                 i.getCurrentPrice(), i.getCurrency(), i.getStatus(),
-                i.getStatus().allowedTransitions(), i.getCurrentLocationId(), i.getCurrentBranchId(),
+                i.getStatus().allowedTransitions(), i.getCurrentLocationId(), i.getCurrentBranchId(), i.getBinId(),
+                primaryImageKey(i),
                 i.getReservedForCustomerId(), i.getReservedUntil(), i.getSupplierId(),
                 i.getReceivedDate(), i.getSoldDate(), i.getOwnerCustomerId(), i.isQualityChecked(),
                 i.getNotes(), i.getVersion());
+    }
+
+    /**
+     * The one image a list row or passport header should show.
+     *
+     * <p>Returned inline so rendering a page of results costs no extra request
+     * per item — the whole reason the reference cache exists is that the same
+     * mistake was expensive elsewhere.
+     */
+    private static String primaryImageKey(JewelleryItem i) {
+        return i.getImages().stream()
+                .filter(ItemImage::isPrimaryImage)
+                .map(ItemImage::getStorageKey)
+                .findFirst()
+                .orElse(null);
     }
 }

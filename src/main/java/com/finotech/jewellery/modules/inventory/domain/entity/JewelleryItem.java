@@ -12,6 +12,13 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
+import java.util.ArrayList;
+import java.util.List;
+import org.hibernate.annotations.BatchSize;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -118,6 +125,30 @@ public class JewelleryItem extends BaseEntity {
 
     @Column(name = "current_location_id")
     private UUID currentLocationId;
+
+    /**
+     * The bin the piece is stored in, within its current location.
+     *
+     * <p>Nullable on purpose: a showroom counter needs no bin, and stock that
+     * has not been put away yet genuinely has none. An item is never blocked
+     * from existing because nobody has assigned it a tray.
+     */
+    @Column(name = "bin_id")
+    private UUID binId;
+
+    /**
+     * Photographs of this piece, ordered as they should be shown.
+     *
+     * <p>Batched deliberately. A page of thirty search results each reading its
+     * own images would fire thirty extra queries; {@code @BatchSize} collapses
+     * those into one. The list response needs only the primary key, but it
+     * needs it for every row.
+     */
+    @OrderBy("displayOrder asc, createdAt asc")
+    @BatchSize(size = 100)
+    @OneToMany(mappedBy = "item", cascade = CascadeType.ALL, orphanRemoval = true,
+            fetch = FetchType.LAZY)
+    private List<ItemImage> images = new ArrayList<>();
 
     @Column(name = "current_branch_id")
     private UUID currentBranchId;

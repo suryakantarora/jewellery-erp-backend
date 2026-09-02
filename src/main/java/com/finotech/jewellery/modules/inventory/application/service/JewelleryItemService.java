@@ -2,18 +2,24 @@ package com.finotech.jewellery.modules.inventory.application.service;
 
 import com.finotech.jewellery.modules.gemstone.application.StoneRegistry;
 import com.finotech.jewellery.modules.gemstone.application.service.GemstoneService;
+import com.finotech.jewellery.modules.warehouse.application.BinDirectory;
+import com.finotech.jewellery.modules.inventory.api.request.LinkImageRequest;
+import com.finotech.jewellery.modules.inventory.api.request.AssignBinRequest;
 import com.finotech.jewellery.modules.inventory.api.request.ChangeStatusRequest;
 import com.finotech.jewellery.modules.inventory.api.request.CreateItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.ReserveItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.TagItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.UpdateItemRequest;
+import com.finotech.jewellery.modules.inventory.api.response.ItemImageResponse;
 import com.finotech.jewellery.modules.inventory.api.response.ItemPassportResponse;
 import com.finotech.jewellery.modules.inventory.api.response.JewelleryItemResponse;
 import com.finotech.jewellery.modules.inventory.api.response.LifecycleEventResponse;
 import com.finotech.jewellery.modules.inventory.application.InventoryOperations;
+import com.finotech.jewellery.modules.inventory.domain.entity.ItemImage;
 import com.finotech.jewellery.modules.inventory.domain.entity.JewelleryItem;
 import com.finotech.jewellery.modules.inventory.domain.enums.ItemStatus;
 import com.finotech.jewellery.modules.inventory.domain.enums.LifecycleEventType;
+import com.finotech.jewellery.modules.inventory.infrastructure.repository.ItemImageRepository;
 import com.finotech.jewellery.modules.inventory.infrastructure.repository.ItemLifecycleEventRepository;
 import com.finotech.jewellery.modules.inventory.infrastructure.repository.JewelleryItemRepository;
 import com.finotech.jewellery.modules.metal.application.MetalRateProvider;
@@ -31,6 +37,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -56,6 +63,8 @@ public class JewelleryItemService implements InventoryOperations {
     private final OrganizationDirectory organizationDirectory;
     private final MetalRateProvider metalRateProvider;
     private final GemstoneService stoneRegistry;
+    private final ItemImageRepository imageRepository;
+    private final BinDirectory binDirectory;
     private final AuditService auditService;
 
     // ---------- queries ----------
@@ -63,9 +72,10 @@ public class JewelleryItemService implements InventoryOperations {
     @Transactional(readOnly = true)
     public PageResponse<JewelleryItemResponse> search(String search, UUID productId, ItemStatus status,
                                                       UUID locationId, UUID branchId, UUID metalId,
-                                                      UUID purityId, Pageable pageable) {
+                                                      UUID purityId, UUID binId,
+                                                      Pageable pageable) {
         return PageResponse.of(itemRepository.search(search, productId, status, locationId, branchId,
-                metalId, purityId, pageable), JewelleryItemResponse::from);
+                metalId, purityId, binId, pageable), JewelleryItemResponse::from);
     }
 
     @Transactional(readOnly = true)
@@ -209,6 +219,118 @@ public class JewelleryItemService implements InventoryOperations {
         auditService.record("ITEM_TAGGED", "JewelleryItem", id, null,
                 JewelleryItemResponse.from(item), item.getCurrentBranchId());
         return JewelleryItemResponse.from(item);
+    }
+
+    /**
+     * Puts the item in a storage bin, or takes it out of one.
+     *
+     * <p>The bin must belong to the item's current location. Without that
+     * check an item could be recorded in a tray on the other side of the
+     * country, which is worse than having no bin at all: a stock count would
+     * report it missing from a vault nobody had reason to search.
+     */
+    @Transactional
+    public JewelleryItemResponse assignBin(UUID id, AssignBinRequest request) {
+        JewelleryItem item = requireItemEntity(id);
+        UUID binId = request == null ? null : request.binId();
+
+        if (binId == null) {
+            item.setBinId(null);
+            lifecycle.record(id, LifecycleEventType.LOCATION_CHANGED, "Removed from bin");
+            auditService.record("ITEM_BIN_CLEARED", "JewelleryItem", id, null, null,
+                    item.getCurrentBranchId());
+            return JewelleryItemResponse.from(item);
+        }
+
+        BinDirectory.BinView bin = binDirectory.requireBin(binId);
+        if (!bin.active()) {
+            throw new ValidationException("Bin " + bin.code() + " is not active");
+        }
+        if (item.getCurrentLocationId() == null
+                || !bin.locationId().equals(item.getCurrentLocationId())) {
+            throw new ValidationException(
+                    "Bin " + bin.code() + " belongs to a different location than the item");
+        }
+
+        item.setBinId(binId);
+        lifecycle.record(id, LifecycleEventType.LOCATION_CHANGED,
+                "Placed in bin " + bin.code());
+        auditService.record("ITEM_BIN_ASSIGNED", "JewelleryItem", id, null,
+                Map.of("binId", binId, "binCode", bin.code()), item.getCurrentBranchId());
+        return JewelleryItemResponse.from(item);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ItemImageResponse> images(UUID id) {
+        requireItemEntity(id);
+        return imageRepository.findAllByItemIdOrderByDisplayOrderAscCreatedAtAsc(id).stream()
+                .map(ItemImageResponse::from)
+                .toList();
+    }
+
+    /**
+     * Links an already-uploaded file to the item.
+     *
+     * <p>A new primary image demotes the previous one rather than failing: the
+     * table allows only one per item, and asking a user to unset the old
+     * picture before setting a new one is ceremony with no purpose.
+     */
+    @Transactional
+    public ItemImageResponse addImage(UUID id, LinkImageRequest request) {
+        JewelleryItem item = requireItemEntity(id);
+
+        if (request.primaryImage()) {
+            imageRepository.findAllByItemIdAndPrimaryImageTrue(id)
+                    .forEach(existing -> existing.setPrimaryImage(false));
+            imageRepository.flush();
+        }
+
+        ItemImage image = new ItemImage();
+        image.setItem(item);
+        image.setStorageKey(request.storageKey().trim());
+        image.setFileName(request.fileName());
+        image.setContentType(request.contentType());
+        image.setSizeBytes(request.sizeBytes());
+        // The first picture of a piece is its primary one; nobody should have
+        // to say so explicitly.
+        image.setPrimaryImage(request.primaryImage()
+                || imageRepository.findAllByItemIdOrderByDisplayOrderAscCreatedAtAsc(id).isEmpty());
+        image.setDisplayOrder(request.displayOrder());
+
+        ItemImage saved = imageRepository.saveAndFlush(image);
+        auditService.record("ITEM_IMAGE_ADDED", "JewelleryItem", id, null,
+                Map.of("storageKey", saved.getStorageKey()), item.getCurrentBranchId());
+        return ItemImageResponse.from(saved);
+    }
+
+    /**
+     * Unlinks an image.
+     *
+     * <p>The stored object is deliberately left in place. Deleting it here
+     * would destroy the binary while any other reference to the same key — a
+     * repair condition photo, for instance — still pointed at it.
+     */
+    @Transactional
+    public void removeImage(UUID id, UUID imageId) {
+        JewelleryItem item = requireItemEntity(id);
+        ItemImage image = imageRepository.findById(imageId)
+                .orElseThrow(() -> new NotFoundException("Image not found"));
+        if (!image.getItem().getId().equals(id)) {
+            throw new ValidationException("That image does not belong to this item");
+        }
+        boolean wasPrimary = image.isPrimaryImage();
+        imageRepository.delete(image);
+        imageRepository.flush();
+
+        // Removing the primary picture must not leave the item with none, or
+        // the passport header silently falls back to a placeholder.
+        if (wasPrimary) {
+            imageRepository.findAllByItemIdOrderByDisplayOrderAscCreatedAtAsc(id).stream()
+                    .findFirst()
+                    .ifPresent(next -> next.setPrimaryImage(true));
+        }
+        auditService.record("ITEM_IMAGE_REMOVED", "JewelleryItem", id, null, null,
+                item.getCurrentBranchId());
     }
 
     /**
@@ -367,7 +489,7 @@ public class JewelleryItemService implements InventoryOperations {
     @Transactional(readOnly = true)
     public List<ItemView> itemsAtLocation(UUID locationId) {
         // Only stock that should physically be there: items in transit have left.
-        return itemRepository.search(null, null, null, locationId, null, null, null,
+        return itemRepository.search(null, null, null, locationId, null, null, null, null,
                         org.springframework.data.domain.Pageable.unpaged())
                 .getContent().stream()
                 .filter(item -> item.getStatus().isInStock())

@@ -64,8 +64,10 @@ public class WarehouseService {
 
     @Transactional
     public BinResponse createBin(WarehouseRequests.BinRequest request) {
-        if (binRepository.existsByCodeIgnoreCase(request.code())) {
-            throw new ConflictException("Bin code already exists: " + request.code());
+        if (binRepository.existsByLocationIdAndCodeIgnoreCase(request.locationId(),
+                request.code())) {
+            throw new ConflictException(
+                    "Bin code already exists at this location: " + request.code());
         }
         OrganizationDirectory.LocationView location =
                 organizationDirectory.requireLocation(request.locationId());

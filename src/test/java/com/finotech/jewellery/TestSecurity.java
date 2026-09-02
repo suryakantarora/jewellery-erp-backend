@@ -30,6 +30,12 @@ public final class TestSecurity {
                 permissions, branchIds, false));
     }
 
+    /** A specific user id, for tests that assert per-user scoping. */
+    public static void authenticateAs(UUID userId, Set<String> permissions, Set<UUID> branchIds) {
+        authenticate(new AuthenticatedUser(userId, "test-user-" + userId, permissions,
+                branchIds, false));
+    }
+
     private static void authenticate(AuthenticatedUser user) {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(user, null, user.authorities()));

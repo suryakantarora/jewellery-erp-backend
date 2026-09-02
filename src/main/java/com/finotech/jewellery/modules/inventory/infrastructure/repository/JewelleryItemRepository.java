@@ -55,6 +55,7 @@ public interface JewelleryItemRepository extends JpaRepository<JewelleryItem, UU
               and (:branchId is null or i.currentBranchId = :branchId)
               and (:metalId is null or i.metalId = :metalId)
               and (:purityId is null or i.purityId = :purityId)
+              and (:binId is null or i.binId = :binId)
             """)
     Page<JewelleryItem> search(@Param("search") String search,
                                @Param("productId") UUID productId,
@@ -63,6 +64,7 @@ public interface JewelleryItemRepository extends JpaRepository<JewelleryItem, UU
                                @Param("branchId") UUID branchId,
                                @Param("metalId") UUID metalId,
                                @Param("purityId") UUID purityId,
+                               @Param("binId") UUID binId,
                                Pageable pageable);
 
     long countByCurrentLocationIdAndStatus(UUID locationId, ItemStatus status);
