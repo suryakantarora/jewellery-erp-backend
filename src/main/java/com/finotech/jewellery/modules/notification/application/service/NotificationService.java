@@ -9,7 +9,9 @@ import com.finotech.jewellery.modules.notification.domain.enums.RecipientType;
 import com.finotech.jewellery.modules.notification.infrastructure.repository.NotificationRepository;
 import com.finotech.jewellery.modules.notification.infrastructure.repository.NotificationTemplateRepository;
 import com.finotech.jewellery.shared.event.DomainEvent;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -48,17 +50,60 @@ public class NotificationService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void queueFor(DomainEvent event, RecipientType recipientType, UUID recipientId,
                          String referenceType, Object referenceId) {
+        List<NotificationTemplate> templates = templatesFor(event);
+        if (templates.isEmpty()) {
+            return;
+        }
+        Map<String, Object> values = new HashMap<>(event.payload());
+        String address = resolveAddress(recipientType, recipientId, values);
+        queueOne(event, templates, values, recipientType, recipientId, address,
+                referenceType, referenceId);
+    }
+
+    /**
+     * Fans one event out to several members of staff: one row per person per
+     * template, each addressed by user id so it lands in exactly one inbox and
+     * on exactly one person's phone.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void queueForUsers(DomainEvent event, Collection<UUID> userIds,
+                              String referenceType, Object referenceId) {
+        if (userIds == null || userIds.isEmpty()) {
+            return;
+        }
+        List<NotificationTemplate> templates = templatesFor(event);
+        if (templates.isEmpty()) {
+            return;
+        }
+        Map<String, Object> values = new HashMap<>(event.payload());
+        for (UUID userId : new LinkedHashSet<>(userIds)) {
+            if (userId != null) {
+                queueOne(event, templates, values, RecipientType.USER, userId, null,
+                        referenceType, referenceId);
+            }
+        }
+    }
+
+    private List<NotificationTemplate> templatesFor(DomainEvent event) {
         List<NotificationTemplate> templates =
                 templateRepository.findAllByEventTypeAndActiveTrue(event.eventType());
         if (templates.isEmpty()) {
             log.debug("No notification template registered for {}", event.eventType());
-            return;
         }
+        return templates;
+    }
 
-        Map<String, Object> values = new HashMap<>(event.payload());
-        String address = resolveAddress(recipientType, recipientId, values);
-
+    private void queueOne(DomainEvent event, List<NotificationTemplate> templates,
+                          Map<String, Object> values, RecipientType recipientType,
+                          UUID recipientId, String address, String referenceType,
+                          Object referenceId) {
         for (NotificationTemplate template : templates) {
+            // A push needs a person with a phone. A branch broadcast has neither,
+            // so queuing a PUSH row for it would only ever be cancelled.
+            if (template.getChannel() == NotificationChannel.PUSH
+                    && recipientType == RecipientType.USER && recipientId == null) {
+                continue;
+            }
             Notification notification = new Notification();
             notification.setEventType(event.eventType());
             notification.setChannel(template.getChannel());

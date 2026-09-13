@@ -2,6 +2,7 @@ package com.finotech.jewellery.shared.event;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -324,6 +325,446 @@ public final class DomainEvents {
         public Map<String, Object> payload() {
             return Map.of("locationId", locationId, "availableCount", availableCount,
                     "threshold", threshold);
+        }
+    }
+
+    // ---------- staff-directed events ----------
+    //
+    // The events above are broadcast to a branch or sent to a customer. These
+    // carry enough to resolve *which member of staff* should be told: the
+    // notification module turns a username into a user id and queues one row
+    // per person. Payload values are never null (Map.of would reject them), so
+    // a missing value renders as an empty string in a template.
+
+    /** A movement is waiting for someone with approval rights to act. */
+    public static final class TransferAwaitingApproval extends BaseEvent {
+        private final UUID movementId;
+        private final String referenceNumber;
+        private final UUID fromBranchId;
+        private final UUID toBranchId;
+        private final String fromLocation;
+        private final String toLocation;
+        private final int itemCount;
+        private final boolean requiresSecondApproval;
+        private final String lastApprover;
+
+        /**
+         * @param lastApprover username of the first approver when a second
+         *                     signature is still needed, so they are not asked
+         *                     to approve their own approval; null on creation
+         */
+        public TransferAwaitingApproval(UUID movementId, String referenceNumber,
+                                        UUID fromBranchId, UUID toBranchId,
+                                        String fromLocation, String toLocation, int itemCount,
+                                        boolean requiresSecondApproval, String lastApprover) {
+            super(toBranchId);
+            this.movementId = movementId;
+            this.referenceNumber = referenceNumber;
+            this.fromBranchId = fromBranchId;
+            this.toBranchId = toBranchId;
+            this.fromLocation = fromLocation;
+            this.toLocation = toLocation;
+            this.itemCount = itemCount;
+            this.requiresSecondApproval = requiresSecondApproval;
+            this.lastApprover = lastApprover;
+        }
+
+        public UUID movementId() {
+            return movementId;
+        }
+
+        public UUID fromBranchId() {
+            return fromBranchId;
+        }
+
+        public UUID toBranchId() {
+            return toBranchId;
+        }
+
+        public boolean requiresSecondApproval() {
+            return requiresSecondApproval;
+        }
+
+        public String lastApprover() {
+            return lastApprover;
+        }
+
+        @Override
+        public String eventType() {
+            return "TRANSFER_AWAITING_APPROVAL";
+        }
+
+        @Override
+        public Map<String, Object> payload() {
+            Map<String, Object> values = new HashMap<>();
+            values.put("movementId", movementId);
+            values.put("referenceNumber", referenceNumber);
+            values.put("fromLocation", fromLocation == null ? "" : fromLocation);
+            values.put("toLocation", toLocation == null ? "" : toLocation);
+            values.put("itemCount", itemCount);
+            values.put("requiresSecondApproval", requiresSecondApproval);
+            return values;
+        }
+    }
+
+    /** A movement was approved or rejected; the person who raised it is told. */
+    public static final class TransferDecided extends BaseEvent {
+        private final UUID movementId;
+        private final String referenceNumber;
+        private final String createdBy;
+        private final boolean approved;
+        private final String rejectionReason;
+
+        public TransferDecided(UUID movementId, String referenceNumber, UUID branchId,
+                               String createdBy, boolean approved, String rejectionReason) {
+            super(branchId);
+            this.movementId = movementId;
+            this.referenceNumber = referenceNumber;
+            this.createdBy = createdBy;
+            this.approved = approved;
+            this.rejectionReason = rejectionReason;
+        }
+
+        public UUID movementId() {
+            return movementId;
+        }
+
+        public String createdBy() {
+            return createdBy;
+        }
+
+        public boolean approved() {
+            return approved;
+        }
+
+        @Override
+        public String eventType() {
+            return approved ? "TRANSFER_APPROVED" : "TRANSFER_REJECTED";
+        }
+
+        @Override
+        public Map<String, Object> payload() {
+            Map<String, Object> values = new HashMap<>();
+            values.put("movementId", movementId);
+            values.put("referenceNumber", referenceNumber);
+            values.put("rejectionReason", rejectionReason == null ? "" : rejectionReason);
+            return values;
+        }
+    }
+
+    /** A purchase order was approved or rejected; the person who raised it is told. */
+    public static final class PurchaseOrderDecided extends BaseEvent {
+        private final UUID purchaseOrderId;
+        private final String orderNumber;
+        private final String createdBy;
+        private final boolean approved;
+        private final String rejectionReason;
+
+        public PurchaseOrderDecided(UUID purchaseOrderId, String orderNumber, UUID branchId,
+                                    String createdBy, boolean approved, String rejectionReason) {
+            super(branchId);
+            this.purchaseOrderId = purchaseOrderId;
+            this.orderNumber = orderNumber;
+            this.createdBy = createdBy;
+            this.approved = approved;
+            this.rejectionReason = rejectionReason;
+        }
+
+        public UUID purchaseOrderId() {
+            return purchaseOrderId;
+        }
+
+        public String createdBy() {
+            return createdBy;
+        }
+
+        public boolean approved() {
+            return approved;
+        }
+
+        @Override
+        public String eventType() {
+            return approved ? "PURCHASE_ORDER_APPROVED" : "PURCHASE_ORDER_REJECTED";
+        }
+
+        @Override
+        public Map<String, Object> payload() {
+            Map<String, Object> values = new HashMap<>();
+            values.put("purchaseOrderId", purchaseOrderId);
+            values.put("orderNumber", orderNumber);
+            values.put("rejectionReason", rejectionReason == null ? "" : rejectionReason);
+            return values;
+        }
+    }
+
+    /**
+     * A repair passed quality check. The customer-facing {@link RepairReady}
+     * still goes out; this one tells the technician and whoever logged the job.
+     */
+    public static final class RepairReadyStaff extends BaseEvent {
+        private final UUID repairRequestId;
+        private final String requestNumber;
+        private final String assignedTo;
+        private final String createdBy;
+
+        public RepairReadyStaff(UUID repairRequestId, String requestNumber, UUID branchId,
+                                String assignedTo, String createdBy) {
+            super(branchId);
+            this.repairRequestId = repairRequestId;
+            this.requestNumber = requestNumber;
+            this.assignedTo = assignedTo;
+            this.createdBy = createdBy;
+        }
+
+        public UUID repairRequestId() {
+            return repairRequestId;
+        }
+
+        public String assignedTo() {
+            return assignedTo;
+        }
+
+        public String createdBy() {
+            return createdBy;
+        }
+
+        @Override
+        public String eventType() {
+            return "REPAIR_READY_STAFF";
+        }
+
+        @Override
+        public Map<String, Object> payload() {
+            Map<String, Object> values = new HashMap<>();
+            values.put("repairRequestId", repairRequestId);
+            values.put("requestNumber", requestNumber);
+            values.put("assignedTo", assignedTo == null ? "" : assignedTo);
+            return values;
+        }
+    }
+
+    /**
+     * A sale at or above the compliance threshold. Derived from
+     * {@link SaleCompleted} by the notification module rather than raised by
+     * sales: the threshold is a reporting concern, not a sales one.
+     */
+    public static final class HighValueSale extends BaseEvent {
+        private final UUID saleId;
+        private final String invoiceNumber;
+        private final BigDecimal totalAmount;
+        private final String currency;
+
+        public HighValueSale(UUID saleId, UUID branchId, String invoiceNumber,
+                             BigDecimal totalAmount, String currency) {
+            super(branchId);
+            this.saleId = saleId;
+            this.invoiceNumber = invoiceNumber;
+            this.totalAmount = totalAmount;
+            this.currency = currency;
+        }
+
+        public UUID saleId() {
+            return saleId;
+        }
+
+        @Override
+        public String eventType() {
+            return "HIGH_VALUE_SALE";
+        }
+
+        @Override
+        public Map<String, Object> payload() {
+            Map<String, Object> values = new HashMap<>();
+            values.put("saleId", saleId);
+            values.put("invoiceNumber", invoiceNumber == null ? "" : invoiceNumber);
+            values.put("totalAmount", totalAmount);
+            values.put("currency", currency == null ? "" : currency);
+            return values;
+        }
+    }
+
+    // =====================================================================
+    // Approvals and discount workflow (V29). Kept in one block at the end
+    // of the catalogue so it can be merged independently of other additions.
+    // =====================================================================
+
+    /** An approver asked the requester for more information before deciding. */
+    public static final class ApprovalInformationRequested extends BaseEvent {
+        private final String approvalType;
+        private final UUID referenceId;
+        private final String reference;
+        private final String message;
+        private final String requestedBy;
+        private final String creatorUsername;
+
+        public ApprovalInformationRequested(UUID branchId, String approvalType, UUID referenceId,
+                                            String reference, String message, String requestedBy,
+                                            String creatorUsername) {
+            super(branchId);
+            this.approvalType = approvalType;
+            this.referenceId = referenceId;
+            this.reference = reference;
+            this.message = message;
+            this.requestedBy = requestedBy;
+            this.creatorUsername = creatorUsername;
+        }
+
+        /** Username of whoever raised the underlying record; the natural recipient. */
+        public String creatorUsername() {
+            return creatorUsername;
+        }
+
+        @Override
+        public String eventType() {
+            return "APPROVAL_INFO_REQUESTED";
+        }
+
+        @Override
+        public Map<String, Object> payload() {
+            Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("approvalType", approvalType);
+            payload.put("referenceId", referenceId);
+            payload.put("reference", String.valueOf(reference));
+            payload.put("message", message);
+            payload.put("requestedBy", requestedBy);
+            payload.put("creatorUsername", String.valueOf(creatorUsername));
+            return payload;
+        }
+    }
+
+    /** The requester answered an approver's information request. */
+    public static final class ApprovalInformationAnswered extends BaseEvent {
+        private final String approvalType;
+        private final UUID referenceId;
+        private final String reference;
+        private final String answer;
+        private final String answeredBy;
+        private final String requestedBy;
+
+        public ApprovalInformationAnswered(UUID branchId, String approvalType, UUID referenceId,
+                                           String reference, String answer, String answeredBy,
+                                           String requestedBy) {
+            super(branchId);
+            this.approvalType = approvalType;
+            this.referenceId = referenceId;
+            this.reference = reference;
+            this.answer = answer;
+            this.answeredBy = answeredBy;
+            this.requestedBy = requestedBy;
+        }
+
+        /** Username of the approver who asked; the natural recipient. */
+        public String requestedBy() {
+            return requestedBy;
+        }
+
+        @Override
+        public String eventType() {
+            return "APPROVAL_INFO_ANSWERED";
+        }
+
+        @Override
+        public Map<String, Object> payload() {
+            Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("approvalType", approvalType);
+            payload.put("referenceId", referenceId);
+            payload.put("reference", String.valueOf(reference));
+            payload.put("answer", answer);
+            payload.put("answeredBy", answeredBy);
+            payload.put("requestedBy", String.valueOf(requestedBy));
+            return payload;
+        }
+    }
+
+    /** A salesperson asked for a discount beyond what the branch policy allows. */
+    public static final class DiscountRequested extends BaseEvent {
+        private final UUID requestId;
+        private final String requestedBy;
+        private final BigDecimal percentage;
+        private final BigDecimal amount;
+        private final UUID itemId;
+        private final UUID customerId;
+
+        public DiscountRequested(UUID requestId, UUID branchId, String requestedBy,
+                                 BigDecimal percentage, BigDecimal amount, UUID itemId,
+                                 UUID customerId) {
+            super(branchId);
+            this.requestId = requestId;
+            this.requestedBy = requestedBy;
+            this.percentage = percentage;
+            this.amount = amount;
+            this.itemId = itemId;
+            this.customerId = customerId;
+        }
+
+        public UUID requestId() {
+            return requestId;
+        }
+
+        @Override
+        public String eventType() {
+            return "DISCOUNT_REQUESTED";
+        }
+
+        @Override
+        public Map<String, Object> payload() {
+            Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("requestId", requestId);
+            payload.put("branchId", branchId());
+            payload.put("requestedBy", requestedBy);
+            payload.put("percentage", percentage);
+            payload.put("amount", amount);
+            payload.put("itemId", itemId);
+            payload.put("customerId", customerId);
+            return payload;
+        }
+    }
+
+    /** A discount request was approved or rejected. */
+    public static final class DiscountDecided extends BaseEvent {
+        private final UUID requestId;
+        private final boolean approved;
+        private final String decidedBy;
+        private final String note;
+        private final String requesterUsername;
+
+        public DiscountDecided(UUID requestId, UUID branchId, boolean approved, String decidedBy,
+                               String note, String requesterUsername) {
+            super(branchId);
+            this.requestId = requestId;
+            this.approved = approved;
+            this.decidedBy = decidedBy;
+            this.note = note;
+            this.requesterUsername = requesterUsername;
+        }
+
+        public UUID requestId() {
+            return requestId;
+        }
+
+        public boolean approved() {
+            return approved;
+        }
+
+        /** Username of the salesperson who asked; the natural recipient. */
+        public String requesterUsername() {
+            return requesterUsername;
+        }
+
+        @Override
+        public String eventType() {
+            return "DISCOUNT_DECIDED";
+        }
+
+        @Override
+        public Map<String, Object> payload() {
+            Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("requestId", requestId);
+            payload.put("approved", approved);
+            payload.put("decidedBy", decidedBy);
+            payload.put("note", note);
+            payload.put("requesterUsername", String.valueOf(requesterUsername));
+            return payload;
         }
     }
 }

@@ -17,6 +17,8 @@ import com.finotech.jewellery.modules.product.application.ProductCatalog;
 import com.finotech.jewellery.modules.supplier.application.SupplierDirectory;
 import com.finotech.jewellery.shared.audit.AuditService;
 import com.finotech.jewellery.shared.common.PageResponse;
+import com.finotech.jewellery.shared.event.DomainEventPublisher;
+import com.finotech.jewellery.shared.event.DomainEvents;
 import com.finotech.jewellery.shared.exception.ConflictException;
 import com.finotech.jewellery.shared.exception.NotFoundException;
 import com.finotech.jewellery.shared.exception.ValidationException;
@@ -48,6 +50,7 @@ public class PurchaseOrderService {
     private final OrganizationDirectory organizationDirectory;
     private final ProductCatalog productCatalog;
     private final AuditService auditService;
+    private final DomainEventPublisher events;
 
     // ---------- requisition ----------
 
@@ -231,6 +234,8 @@ public class PurchaseOrderService {
         auditService.record("PURCHASE_ORDER_APPROVED", "PurchaseOrder", id, null,
                 Map.of("estimatedTotal", String.valueOf(order.getEstimatedTotal())),
                 order.getBranchId());
+        events.publish(new DomainEvents.PurchaseOrderDecided(order.getId(),
+                order.getOrderNumber(), order.getBranchId(), order.getCreatedBy(), true, null));
         return PurchaseOrderResponse.from(order);
     }
 
@@ -244,6 +249,8 @@ public class PurchaseOrderService {
         order.setRejectionReason(reason);
         auditService.record("PURCHASE_ORDER_REJECTED", "PurchaseOrder", id, null,
                 Map.of("reason", String.valueOf(reason)), order.getBranchId());
+        events.publish(new DomainEvents.PurchaseOrderDecided(order.getId(),
+                order.getOrderNumber(), order.getBranchId(), order.getCreatedBy(), false, reason));
         return PurchaseOrderResponse.from(order);
     }
 

@@ -129,6 +129,10 @@ public class RepairRequest extends BaseEntity {
     @Column(name = "notes", length = 500)
     private String notes;
 
+    /** Client key from X-Idempotency-Key; unique so a retried intake cannot duplicate. */
+    @Column(name = "idempotency_key", length = 100)
+    private String idempotencyKey;
+
     @OrderBy("occurredAt asc")
     @OneToMany(mappedBy = "repairRequest", cascade = CascadeType.ALL, orphanRemoval = true,
             fetch = FetchType.LAZY)

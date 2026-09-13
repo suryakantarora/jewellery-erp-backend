@@ -25,9 +25,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * Repair intake through delivery (section 16).
@@ -69,6 +71,23 @@ public class RepairService {
     /** Step 1: the piece is taken in and its condition recorded. */
     @Transactional
     public RepairResponse receive(RepairRequests.ReceiveRequest request) {
+        return receive(request, null);
+    }
+
+    /**
+     * Step 1 with retry protection.
+     *
+     * @param idempotencyKey optional client key; replaying the same key returns
+     *                       the job already opened instead of a duplicate
+     */
+    @Transactional
+    public RepairResponse receive(RepairRequests.ReceiveRequest request, String idempotencyKey) {
+        if (StringUtils.hasText(idempotencyKey)) {
+            var existing = repairRepository.findByIdempotencyKey(idempotencyKey);
+            if (existing.isPresent()) {
+                return RepairResponse.from(existing.get());
+            }
+        }
         CustomerDirectory.CustomerView customer =
                 customerDirectory.requireTransactableCustomer(request.customerId());
         SecurityUtils.requireBranchAccess(request.branchId());
@@ -87,8 +106,19 @@ public class RepairService {
         repair.setReceivedDate(LocalDate.now());
         repair.setNotes(request.notes());
         repair.setStatus(RepairStatus.RECEIVED);
+        repair.setIdempotencyKey(StringUtils.hasText(idempotencyKey) ? idempotencyKey : null);
 
-        RepairRequest saved = repairRepository.save(repair);
+        RepairRequest saved;
+        try {
+            saved = repairRepository.saveAndFlush(repair);
+        } catch (DataIntegrityViolationException ex) {
+            // A concurrent retry with the same key won the insert; hand back its job.
+            if (StringUtils.hasText(idempotencyKey)) {
+                return RepairResponse.from(
+                        repairRepository.findByIdempotencyKey(idempotencyKey).orElseThrow(() -> ex));
+            }
+            throw ex;
+        }
         recordHistory(saved, null, RepairStatus.RECEIVED, "Received for repair");
 
         // A piece we sold is taken out of circulation while it is with us.
@@ -221,6 +251,9 @@ public class RepairService {
 
             events.publish(new DomainEvents.RepairReady(repair.getId(), repair.getCustomerId(),
                     repair.getBranchId(), repair.getRequestNumber()));
+            events.publish(new DomainEvents.RepairReadyStaff(repair.getId(),
+                    repair.getRequestNumber(), repair.getBranchId(), repair.getAssignedTo(),
+                    repair.getCreatedBy()));
         } else {
             repair.transitionTo(RepairStatus.IN_PROGRESS);
             recordHistory(repair, RepairStatus.QUALITY_CHECK, RepairStatus.IN_PROGRESS,

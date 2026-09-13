@@ -20,6 +20,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -55,11 +56,38 @@ public class GlobalExceptionHandler {
         return build(ErrorCode.VALIDATION_FAILED, "Request validation failed", request, fields);
     }
 
+    /**
+     * A query or path parameter that could not be converted. For an enum the
+     * accepted values are listed, mirroring the body path below: a client
+     * sending {@code ?status=BOGUS} otherwise got a 500 and nothing to go on.
+     */
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ApiError> handleTypeMismatch(MethodArgumentTypeMismatchException ex,
                                                        HttpServletRequest request) {
         String message = "Invalid value for parameter '" + ex.getName() + "'";
-        return build(ErrorCode.VALIDATION_FAILED, message, request, null);
+        Class<?> target = ex.getRequiredType();
+        String detail = target != null && target.isEnum()
+                ? acceptedValues(target)
+                : "Invalid value";
+        return build(ErrorCode.VALIDATION_FAILED, message, request,
+                List.of(new ApiError.FieldError(ex.getName(), detail)));
+    }
+
+    /**
+     * Constraint annotations on {@code @RequestParam} / {@code @PathVariable}
+     * arguments are reported by Spring 6.1+ through this exception rather than
+     * {@link ConstraintViolationException}, so it needs its own mapping.
+     */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ApiError> handleMethodValidation(HandlerMethodValidationException ex,
+                                                           HttpServletRequest request) {
+        List<ApiError.FieldError> fields = ex.getAllValidationResults().stream()
+                .flatMap(result -> result.getResolvableErrors().stream()
+                        .map(error -> new ApiError.FieldError(
+                                result.getMethodParameter().getParameterName(),
+                                error.getDefaultMessage())))
+                .toList();
+        return build(ErrorCode.VALIDATION_FAILED, "Request validation failed", request, fields);
     }
 
     /**
@@ -159,11 +187,15 @@ public class GlobalExceptionHandler {
     private static String describeRejectedValue(InvalidFormatException ex) {
         Class<?> target = ex.getTargetType();
         if (target != null && target.isEnum()) {
-            return "Must be one of: " + Arrays.stream(target.getEnumConstants())
-                    .map(String::valueOf)
-                    .collect(Collectors.joining(", "));
+            return acceptedValues(target);
         }
         return "Invalid value for this field";
+    }
+
+    private static String acceptedValues(Class<?> enumType) {
+        return "Must be one of: " + Arrays.stream(enumType.getEnumConstants())
+                .map(String::valueOf)
+                .collect(Collectors.joining(", "));
     }
 
     private ResponseEntity<ApiError> build(ErrorCode code, String message, HttpServletRequest request,

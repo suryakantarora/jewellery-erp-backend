@@ -56,6 +56,23 @@ jewellery:
       - /swagger-ui/**
       - /swagger-ui.html
       - /actuator/health/**
+      # The forced-update gate runs before login, so it must be reachable anonymously.
+      - /api/v1/app/version
+  app:
+    # Mobile app version gate: GET /api/v1/app/version. A client older than
+    # min-supported is told to update before it can continue. Store URLs are
+    # empty until the listings exist.
+    versions:
+      android:
+        min-supported: ${APP_ANDROID_MIN_SUPPORTED:0.1.0}
+        latest: ${APP_ANDROID_LATEST:0.1.0}
+        store-url: ${APP_ANDROID_STORE_URL:}
+        message: ${APP_ANDROID_MESSAGE:}
+      ios:
+        min-supported: ${APP_IOS_MIN_SUPPORTED:0.1.0}
+        latest: ${APP_IOS_LATEST:0.1.0}
+        store-url: ${APP_IOS_STORE_URL:}
+        message: ${APP_IOS_MESSAGE:}
   storage:
     # 'local' writes to disk and is the development default. It is not suitable
     # for more than one instance; use a shared object store in production.
@@ -83,6 +100,14 @@ jewellery:
     max-attempts: ${NOTIFICATION_MAX_ATTEMPTS:3}
     batch-size: ${NOTIFICATION_BATCH_SIZE:50}
     dispatch-interval-ms: ${NOTIFICATION_DISPATCH_INTERVAL_MS:30000}
+    # Currency quoted in staff alerts (the sale event carries none).
+    currency: ${NOTIFICATION_CURRENCY:LAK}
+    push:
+      # Off by default: with no Firebase project, PUSH rows go to the log. When
+      # on, credentials-file must point at the service-account JSON from the
+      # Firebase console; a missing file fails each row with "push not configured".
+      enabled: ${FCM_ENABLED:false}
+      credentials-file: ${FCM_CREDENTIALS_FILE:}
 
 # Multipart limits are enforced by the container as well as by the service, so
 # an oversized upload is rejected before it is buffered.

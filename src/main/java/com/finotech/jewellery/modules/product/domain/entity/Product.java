@@ -17,6 +17,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.hibernate.annotations.BatchSize;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -91,7 +92,8 @@ public class Product extends BaseEntity {
     @Column(name = "status", nullable = false, length = 20)
     private MasterStatus status = MasterStatus.ACTIVE;
 
-    @OrderBy("displayOrder asc")
+    @OrderBy("displayOrder asc, createdAt asc")
+    @BatchSize(size = 100)
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true,
             fetch = FetchType.LAZY)
     private List<ProductImage> images = new ArrayList<>();

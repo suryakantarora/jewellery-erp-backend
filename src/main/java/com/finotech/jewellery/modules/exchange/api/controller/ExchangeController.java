@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -58,13 +59,15 @@ public class ExchangeController {
         return ResponseEntity.ok(ApiResponse.ok(exchangeService.get(id)));
     }
 
-    @Operation(summary = "Step 1 — take in old jewellery from a customer")
+    @Operation(summary = "Step 1 — take in old jewellery from a customer",
+            description = "Send X-Idempotency-Key to make retries safe.")
     @PostMapping
     @PreAuthorize(PROCESS)
     public ResponseEntity<ApiResponse<ExchangeResponse>> receive(
-            @Valid @RequestBody ExchangeRequests.ReceiveRequest request) {
+            @Valid @RequestBody ExchangeRequests.ReceiveRequest request,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok(exchangeService.receive(request)));
+                .body(ApiResponse.ok(exchangeService.receive(request, idempotencyKey)));
     }
 
     @Operation(summary = "Step 2 — record gross and stone weights")

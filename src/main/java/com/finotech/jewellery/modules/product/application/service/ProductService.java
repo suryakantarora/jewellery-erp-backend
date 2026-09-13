@@ -1,24 +1,35 @@
 package com.finotech.jewellery.modules.product.application.service;
 
 import com.finotech.jewellery.modules.product.api.request.DesignRequest;
+import com.finotech.jewellery.modules.product.api.request.LinkImageRequest;
 import com.finotech.jewellery.modules.product.api.request.ProductRequest;
 import com.finotech.jewellery.modules.product.api.response.DesignResponse;
+import com.finotech.jewellery.modules.product.api.response.ImageResponse;
 import com.finotech.jewellery.modules.product.api.response.ProductResponse;
 import com.finotech.jewellery.modules.product.application.ProductCatalog;
+import com.finotech.jewellery.modules.product.domain.entity.DesignImage;
 import com.finotech.jewellery.modules.product.domain.entity.JewelleryDesign;
 import com.finotech.jewellery.modules.product.domain.entity.Product;
+import com.finotech.jewellery.modules.product.domain.entity.ProductImage;
 import com.finotech.jewellery.modules.product.domain.enums.MasterStatus;
 import com.finotech.jewellery.modules.product.infrastructure.repository.BrandRepository;
 import com.finotech.jewellery.modules.product.infrastructure.repository.CollectionRepository;
+import com.finotech.jewellery.modules.product.infrastructure.repository.DesignImageRepository;
 import com.finotech.jewellery.modules.product.infrastructure.repository.JewelleryDesignRepository;
 import com.finotech.jewellery.modules.product.infrastructure.repository.ProductCategoryRepository;
+import com.finotech.jewellery.modules.product.infrastructure.repository.ProductImageRepository;
 import com.finotech.jewellery.modules.product.infrastructure.repository.ProductRepository;
 import com.finotech.jewellery.modules.product.infrastructure.repository.ProductTypeRepository;
 import com.finotech.jewellery.shared.audit.AuditService;
 import com.finotech.jewellery.shared.common.PageResponse;
 import com.finotech.jewellery.shared.exception.ConflictException;
 import com.finotech.jewellery.shared.exception.NotFoundException;
+import com.finotech.jewellery.shared.exception.ValidationException;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -38,6 +49,8 @@ public class ProductService implements ProductCatalog {
     private final ProductCategoryRepository categoryRepository;
     private final BrandRepository brandRepository;
     private final CollectionRepository collectionRepository;
+    private final DesignImageRepository designImageRepository;
+    private final ProductImageRepository productImageRepository;
     private final AuditService auditService;
 
     // ---------- design ----------
@@ -127,16 +140,158 @@ public class ProductService implements ProductCatalog {
         auditService.record("PRODUCT_DEACTIVATED", "Product", id, null, null);
     }
 
+    // ---------- design images ----------
+
+    @Transactional(readOnly = true)
+    public List<ImageResponse> designImages(UUID designId) {
+        requireDesign(designId);
+        return designImageRepository.findAllByDesignIdOrderByDisplayOrderAscCreatedAtAsc(designId)
+                .stream().map(ImageResponse::from).toList();
+    }
+
+    /**
+     * Links an already-uploaded file to the design. A new primary demotes the
+     * previous one, and the first picture is primary whether or not it says so
+     * — the same rules as item images, for the same reasons.
+     */
+    @Transactional
+    public ImageResponse addDesignImage(UUID designId, LinkImageRequest request) {
+        JewelleryDesign design = requireDesign(designId);
+
+        if (request.primaryImage()) {
+            designImageRepository.findAllByDesignIdAndPrimaryImageTrue(designId)
+                    .forEach(existing -> existing.setPrimaryImage(false));
+            designImageRepository.flush();
+        }
+
+        DesignImage image = new DesignImage();
+        image.setDesign(design);
+        image.setStorageKey(request.storageKey().trim());
+        image.setFileName(request.fileName());
+        image.setContentType(request.contentType());
+        image.setSizeBytes(request.sizeBytes());
+        image.setPrimaryImage(request.primaryImage()
+                || designImageRepository.findAllByDesignIdOrderByDisplayOrderAscCreatedAtAsc(designId)
+                        .isEmpty());
+        image.setDisplayOrder(request.displayOrder());
+
+        DesignImage saved = designImageRepository.saveAndFlush(image);
+        design.getImages().add(saved);
+        auditService.record("DESIGN_IMAGE_ADDED", "JewelleryDesign", designId, null,
+                Map.of("storageKey", saved.getStorageKey()));
+        return ImageResponse.from(saved);
+    }
+
+    /** Unlinks an image; the stored object is kept, as other references may share it. */
+    @Transactional
+    public void removeDesignImage(UUID designId, UUID imageId) {
+        JewelleryDesign design = requireDesign(designId);
+        DesignImage image = designImageRepository.findById(imageId)
+                .orElseThrow(() -> new NotFoundException("Image not found"));
+        if (!image.getDesign().getId().equals(designId)) {
+            throw new ValidationException("That image does not belong to this design");
+        }
+        boolean wasPrimary = image.isPrimaryImage();
+        design.getImages().remove(image);
+        designImageRepository.delete(image);
+        designImageRepository.flush();
+
+        if (wasPrimary) {
+            designImageRepository.findAllByDesignIdOrderByDisplayOrderAscCreatedAtAsc(designId)
+                    .stream().findFirst().ifPresent(next -> next.setPrimaryImage(true));
+        }
+        auditService.record("DESIGN_IMAGE_REMOVED", "JewelleryDesign", designId, null, null);
+    }
+
+    // ---------- product images ----------
+
+    @Transactional(readOnly = true)
+    public List<ImageResponse> productImages(UUID productId) {
+        requireProductEntity(productId);
+        return productImageRepository.findAllByProductIdOrderByDisplayOrderAscCreatedAtAsc(productId)
+                .stream().map(ImageResponse::from).toList();
+    }
+
+    @Transactional
+    public ImageResponse addProductImage(UUID productId, LinkImageRequest request) {
+        Product product = requireProductEntity(productId);
+
+        if (request.primaryImage()) {
+            productImageRepository.findAllByProductIdAndPrimaryImageTrue(productId)
+                    .forEach(existing -> existing.setPrimaryImage(false));
+            productImageRepository.flush();
+        }
+
+        ProductImage image = new ProductImage();
+        image.setProduct(product);
+        image.setStorageKey(request.storageKey().trim());
+        image.setFileName(request.fileName());
+        image.setContentType(request.contentType());
+        image.setSizeBytes(request.sizeBytes());
+        image.setPrimaryImage(request.primaryImage()
+                || productImageRepository.findAllByProductIdOrderByDisplayOrderAscCreatedAtAsc(productId)
+                        .isEmpty());
+        image.setDisplayOrder(request.displayOrder());
+
+        ProductImage saved = productImageRepository.saveAndFlush(image);
+        product.getImages().add(saved);
+        auditService.record("PRODUCT_IMAGE_ADDED", "Product", productId, null,
+                Map.of("storageKey", saved.getStorageKey()));
+        return ImageResponse.from(saved);
+    }
+
+    @Transactional
+    public void removeProductImage(UUID productId, UUID imageId) {
+        Product product = requireProductEntity(productId);
+        ProductImage image = productImageRepository.findById(imageId)
+                .orElseThrow(() -> new NotFoundException("Image not found"));
+        if (!image.getProduct().getId().equals(productId)) {
+            throw new ValidationException("That image does not belong to this product");
+        }
+        boolean wasPrimary = image.isPrimaryImage();
+        product.getImages().remove(image);
+        productImageRepository.delete(image);
+        productImageRepository.flush();
+
+        if (wasPrimary) {
+            productImageRepository.findAllByProductIdOrderByDisplayOrderAscCreatedAtAsc(productId)
+                    .stream().findFirst().ifPresent(next -> next.setPrimaryImage(true));
+        }
+        auditService.record("PRODUCT_IMAGE_REMOVED", "Product", productId, null, null);
+    }
+
     // ---------- cross-module catalog ----------
 
     @Override
     @Transactional(readOnly = true)
     public ProductView requireProduct(UUID productId) {
         Product p = requireProductEntity(productId);
-        return new ProductView(p.getId(), p.getSku(), p.getName(), p.getProductType().getId(),
+        return new ProductView(p.getId(), p.getSku(), p.getName(),
+                p.getDesign() == null ? null : p.getDesign().getId(), p.getProductType().getId(),
                 p.getDefaultMetalId(), p.getDefaultPurityId(), p.getDefaultMakingChargeValue(),
                 p.getDefaultMakingChargeType(), p.getDefaultWastagePercentage(),
                 p.getStatus() == MasterStatus.ACTIVE);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, ProductLabel> labelsFor(Collection<UUID> productIds) {
+        if (productIds == null || productIds.isEmpty()) {
+            return Map.of();
+        }
+        return productRepository.findAllById(productIds).stream()
+                .collect(Collectors.toMap(Product::getId,
+                        p -> new ProductLabel(p.getId(), p.getSku(), p.getName())));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, String> designNamesFor(Collection<UUID> designIds) {
+        if (designIds == null || designIds.isEmpty()) {
+            return Map.of();
+        }
+        return designRepository.findAllById(designIds).stream()
+                .collect(Collectors.toMap(JewelleryDesign::getId, JewelleryDesign::getName));
     }
 
     // ---------- helpers ----------

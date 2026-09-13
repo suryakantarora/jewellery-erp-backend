@@ -109,7 +109,9 @@ public class NotificationInboxService {
 
     private boolean isAddressedTo(Notification notification, AuthenticatedUser user) {
         if (notification.getRecipientType() != com.finotech.jewellery.modules.notification
-                .domain.enums.RecipientType.USER) {
+                .domain.enums.RecipientType.USER
+                || notification.getChannel() != com.finotech.jewellery.modules.notification
+                .domain.enums.NotificationChannel.IN_APP) {
             return false;
         }
         if (user.userId().equals(notification.getRecipientId())) {

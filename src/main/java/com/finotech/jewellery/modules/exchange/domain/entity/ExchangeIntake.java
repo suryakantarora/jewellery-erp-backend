@@ -167,6 +167,10 @@ public class ExchangeIntake extends BaseEntity {
     @Column(name = "notes", length = 500)
     private String notes;
 
+    /** Client key from X-Idempotency-Key; unique so a retried intake cannot duplicate. */
+    @Column(name = "idempotency_key", length = 100)
+    private String idempotencyKey;
+
     /**
      * @throws ConflictException if the workflow step is out of order
      */

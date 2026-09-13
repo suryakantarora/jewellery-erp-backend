@@ -1,6 +1,7 @@
 package com.finotech.jewellery.modules.product.api.response;
 
 import com.finotech.jewellery.modules.product.domain.entity.Product;
+import com.finotech.jewellery.modules.product.domain.entity.ProductImage;
 import com.finotech.jewellery.modules.product.domain.enums.MasterStatus;
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -10,7 +11,8 @@ public record ProductResponse(UUID id, String sku, String name, UUID designId, U
                               UUID defaultPurityId, BigDecimal nominalGrossWeight,
                               String defaultMakingChargeType, BigDecimal defaultMakingChargeValue,
                               BigDecimal defaultWastagePercentage, String hsnCode,
-                              String description, MasterStatus status) {
+                              String description, MasterStatus status,
+                              String primaryImageKey) {
 
     public static ProductResponse from(Product p) {
         return new ProductResponse(p.getId(), p.getSku(), p.getName(),
@@ -21,6 +23,8 @@ public record ProductResponse(UUID id, String sku, String name, UUID designId, U
                 p.getCollection() == null ? null : p.getCollection().getId(),
                 p.getDefaultMetalId(), p.getDefaultPurityId(), p.getNominalGrossWeight(),
                 p.getDefaultMakingChargeType(), p.getDefaultMakingChargeValue(),
-                p.getDefaultWastagePercentage(), p.getHsnCode(), p.getDescription(), p.getStatus());
+                p.getDefaultWastagePercentage(), p.getHsnCode(), p.getDescription(), p.getStatus(),
+                p.getImages().stream().filter(ProductImage::isPrimaryImage)
+                        .map(ProductImage::getStorageKey).findFirst().orElse(null));
     }
 }

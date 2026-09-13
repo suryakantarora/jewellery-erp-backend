@@ -37,9 +37,30 @@ public class LoggingNotificationSender {
         return channelSender(NotificationChannel.SMS);
     }
 
+    /**
+     * Stands in for FCM only while push is switched off; with
+     * {@code jewellery.notification.push.enabled=true} the real sender owns the
+     * channel and this bean must not compete for it.
+     */
     @Bean
+    @ConditionalOnProperty(prefix = "jewellery.notification.push", name = "enabled",
+            havingValue = "false", matchIfMissing = true)
     public NotificationSender pushLoggingSender() {
-        return channelSender(NotificationChannel.PUSH);
+        // Push is addressed by user id (devices are looked up at send time), not
+        // by an address string, so it must not fail on the missing address.
+        return new NotificationSender() {
+            @Override
+            public NotificationChannel channel() {
+                return NotificationChannel.PUSH;
+            }
+
+            @Override
+            public void send(Notification notification) {
+                log.info("[PUSH] to {} {} | {} | {}", notification.getRecipientType(),
+                        notification.getRecipientId(), notification.getSubject(),
+                        notification.getBody());
+            }
+        };
     }
 
     /** In-app messages need no transport: they are read from the database. */

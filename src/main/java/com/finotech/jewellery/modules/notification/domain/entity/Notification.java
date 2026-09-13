@@ -112,6 +112,14 @@ public class Notification extends BaseEntity {
                 : NotificationStatus.FAILED;
     }
 
+    /** Gives up without retrying: nothing about a later attempt could differ. */
+    public void markCancelled(String reason) {
+        this.attemptCount++;
+        this.lastAttemptAt = Instant.now();
+        this.failureReason = reason;
+        this.status = NotificationStatus.CANCELLED;
+    }
+
     public boolean isRetryable(int maxAttempts) {
         return (status == NotificationStatus.PENDING || status == NotificationStatus.FAILED)
                 && attemptCount < maxAttempts;

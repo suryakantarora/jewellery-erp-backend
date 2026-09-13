@@ -1,8 +1,10 @@
 package com.finotech.jewellery.modules.product.api.controller;
 
 import com.finotech.jewellery.modules.product.api.request.DesignRequest;
+import com.finotech.jewellery.modules.product.api.request.LinkImageRequest;
 import com.finotech.jewellery.modules.product.api.request.ProductRequest;
 import com.finotech.jewellery.modules.product.api.response.DesignResponse;
+import com.finotech.jewellery.modules.product.api.response.ImageResponse;
 import com.finotech.jewellery.modules.product.api.response.ProductResponse;
 import com.finotech.jewellery.modules.product.application.service.ProductService;
 import com.finotech.jewellery.shared.common.ApiResponse;
@@ -10,6 +12,7 @@ import com.finotech.jewellery.shared.common.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -75,6 +78,34 @@ public class ProductController {
         return ResponseEntity.ok(ApiResponse.ok(productService.updateDesign(id, request)));
     }
 
+    @Operation(summary = "List a design's images")
+    @GetMapping("/designs/{id}/images")
+    @PreAuthorize(VIEW)
+    public ResponseEntity<ApiResponse<List<ImageResponse>>> designImages(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(productService.designImages(id)));
+    }
+
+    @Operation(summary = "Link an uploaded image to a design",
+            description = "Upload the file to POST /api/v1/files first, then send the "
+                    + "storage key it returns.")
+    @PostMapping("/designs/{id}/images")
+    @PreAuthorize(UPDATE)
+    public ResponseEntity<ApiResponse<ImageResponse>> addDesignImage(
+            @PathVariable UUID id, @Valid @RequestBody LinkImageRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(productService.addDesignImage(id, request)));
+    }
+
+    @Operation(summary = "Unlink an image from a design",
+            description = "The stored file itself is kept; only the link is removed.")
+    @DeleteMapping("/designs/{id}/images/{imageId}")
+    @PreAuthorize(UPDATE)
+    public ResponseEntity<ApiResponse<Void>> removeDesignImage(
+            @PathVariable UUID id, @PathVariable UUID imageId) {
+        productService.removeDesignImage(id, imageId);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
     @Operation(summary = "Search products")
     @GetMapping("/products")
     @PreAuthorize(VIEW)
@@ -111,6 +142,34 @@ public class ProductController {
     public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(
             @PathVariable UUID id, @Valid @RequestBody ProductRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(productService.updateProduct(id, request)));
+    }
+
+    @Operation(summary = "List a product's images")
+    @GetMapping("/products/{id}/images")
+    @PreAuthorize(VIEW)
+    public ResponseEntity<ApiResponse<List<ImageResponse>>> productImages(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(productService.productImages(id)));
+    }
+
+    @Operation(summary = "Link an uploaded image to a product",
+            description = "Upload the file to POST /api/v1/files first, then send the "
+                    + "storage key it returns.")
+    @PostMapping("/products/{id}/images")
+    @PreAuthorize(UPDATE)
+    public ResponseEntity<ApiResponse<ImageResponse>> addProductImage(
+            @PathVariable UUID id, @Valid @RequestBody LinkImageRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(productService.addProductImage(id, request)));
+    }
+
+    @Operation(summary = "Unlink an image from a product",
+            description = "The stored file itself is kept; only the link is removed.")
+    @DeleteMapping("/products/{id}/images/{imageId}")
+    @PreAuthorize(UPDATE)
+    public ResponseEntity<ApiResponse<Void>> removeProductImage(
+            @PathVariable UUID id, @PathVariable UUID imageId) {
+        productService.removeProductImage(id, imageId);
+        return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
     @Operation(summary = "Deactivate a product")

@@ -2,6 +2,7 @@ package com.finotech.jewellery.modules.product.domain.entity;
 
 import com.finotech.jewellery.modules.product.domain.enums.MasterStatus;
 import com.finotech.jewellery.shared.common.BaseEntity;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -9,8 +10,13 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+import org.hibernate.annotations.BatchSize;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -57,4 +63,14 @@ public class JewelleryDesign extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private MasterStatus status = MasterStatus.ACTIVE;
+
+    /**
+     * Catalogue artwork, ordered for display. Batched so a page of designs
+     * reads all its primary keys in one query rather than one per row.
+     */
+    @OrderBy("displayOrder asc, createdAt asc")
+    @BatchSize(size = 100)
+    @OneToMany(mappedBy = "design", cascade = CascadeType.ALL, orphanRemoval = true,
+            fetch = FetchType.LAZY)
+    private List<DesignImage> images = new ArrayList<>();
 }

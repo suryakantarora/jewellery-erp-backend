@@ -4,11 +4,13 @@ import com.finotech.jewellery.modules.customer.application.CustomerDirectory;
 import com.finotech.jewellery.modules.inventory.application.InventoryOperations;
 import com.finotech.jewellery.modules.loyalty.application.LoyaltySettlement;
 import com.finotech.jewellery.modules.pricing.application.PricingCalculator;
+import com.finotech.jewellery.modules.pricing.domain.enums.DiscountType;
 import com.finotech.jewellery.modules.sales.api.request.CreateSaleRequest;
 import com.finotech.jewellery.modules.sales.api.request.SaleReturnRequest;
 import com.finotech.jewellery.modules.sales.api.response.SaleResponse;
 import com.finotech.jewellery.modules.sales.application.SaleSettlement;
 import com.finotech.jewellery.modules.sales.application.SalesHistory;
+import com.finotech.jewellery.modules.sales.domain.entity.DiscountRequest;
 import com.finotech.jewellery.modules.sales.domain.entity.Sale;
 import com.finotech.jewellery.modules.sales.domain.entity.SaleLine;
 import com.finotech.jewellery.modules.sales.domain.enums.SaleStatus;
@@ -63,6 +65,7 @@ public class SaleService implements SaleSettlement, SalesHistory {
     private final InventoryOperations inventory;
     private final CustomerDirectory customerDirectory;
     private final LoyaltySettlement loyaltySettlement;
+    private final DiscountRequestService discountRequestService;
     private final AuditService auditService;
     private final DomainEventPublisher events;
 
@@ -109,6 +112,13 @@ public class SaleService implements SaleSettlement, SalesHistory {
             }
         }
 
+        // A manager's approval, raised beforehand, stands in for DISCOUNT_APPROVE
+        // on this one sale — but only up to what was actually approved.
+        boolean holdsApproval = hasDiscountApproval();
+        DiscountRequest approvedRequest = request.discountRequestId() == null ? null
+                : discountRequestService.requireUsableFor(request.discountRequestId(),
+                        request.branchId(), customer.id(), seen);
+
         Sale sale = new Sale();
         sale.setSaleNumber(CodeGenerator.reference("SL"));
         sale.setCustomerId(customer.id());
@@ -123,6 +133,7 @@ public class SaleService implements SaleSettlement, SalesHistory {
         sale.setExternalReference(StringUtils.hasText(idempotencyKey) ? idempotencyKey : null);
 
         boolean anyDiscountApproved = false;
+        BigDecimal manualDiscountUnderRequest = BigDecimal.ZERO;
         BigDecimal subTotal = BigDecimal.ZERO;
         BigDecimal discountTotal = BigDecimal.ZERO;
         BigDecimal taxTotal = BigDecimal.ZERO;
@@ -133,7 +144,10 @@ public class SaleService implements SaleSettlement, SalesHistory {
             // same item to another sale is rejected here rather than at payment.
             inventory.reserve(requested.jewelleryItemId(), customer.id(), PAYMENT_HOLD_HOURS);
 
-            boolean discountApproved = hasDiscountApproval();
+            boolean coveredByRequest = approvedRequest != null
+                    && (approvedRequest.getJewelleryItemId() == null
+                        || approvedRequest.getJewelleryItemId().equals(requested.jewelleryItemId()));
+            boolean discountApproved = holdsApproval || coveredByRequest;
             PricingCalculator.PriceBreakdown price = pricingCalculator.calculate(
                     new PricingCalculator.PriceRequest(
                             requested.jewelleryItemId(), customer.id(), request.branchId(),
@@ -142,6 +156,11 @@ public class SaleService implements SaleSettlement, SalesHistory {
 
             if (price.discountRequiresApproval()) {
                 anyDiscountApproved = true;
+                if (!holdsApproval && coveredByRequest) {
+                    assertWithinApprovedDiscount(approvedRequest, requested);
+                    manualDiscountUnderRequest = manualDiscountUnderRequest
+                            .add(MoneyUtils.nullSafe(price.manualDiscountAmount()));
+                }
             }
 
             SaleLine line = new SaleLine();
@@ -172,8 +191,16 @@ public class SaleService implements SaleSettlement, SalesHistory {
         sale.setDiscountTotal(MoneyUtils.money(discountTotal));
         sale.setTaxTotal(MoneyUtils.money(taxTotal));
         sale.setTotalAmount(MoneyUtils.money(total));
+        if (approvedRequest != null && !approvedRequest.isPercentage()
+                && manualDiscountUnderRequest.compareTo(approvedRequest.getRequestedAmount()) > 0) {
+            throw new ValidationException("Discounts on this sale total "
+                    + MoneyUtils.money(manualDiscountUnderRequest) + ", which exceeds the approved "
+                    + approvedRequest.getRequestedAmount());
+        }
         if (anyDiscountApproved) {
-            sale.setDiscountApprovedBy(SecurityUtils.currentUsername().orElse("system"));
+            sale.setDiscountApprovedBy(!holdsApproval && approvedRequest != null
+                    ? approvedRequest.getDecidedBy()
+                    : SecurityUtils.currentUsername().orElse("system"));
         }
 
         if (sale.getExchangeCredit().compareTo(sale.getTotalAmount()) > 0) {
@@ -181,6 +208,10 @@ public class SaleService implements SaleSettlement, SalesHistory {
         }
 
         Sale saved = saleRepository.saveAndFlush(sale);
+
+        if (approvedRequest != null) {
+            discountRequestService.consume(approvedRequest.getId(), saved.getId());
+        }
 
         // Points are spent only once the price is settled, so the customer is
         // never charged points against a sale that failed to open.
@@ -436,6 +467,31 @@ public class SaleService implements SaleSettlement, SalesHistory {
     private Sale requireSale(UUID id) {
         return saleRepository.findWithLinesById(id)
                 .orElseThrow(() -> NotFoundException.of("Sale", id));
+    }
+
+    /**
+     * A percentage approval caps each covered line at that percentage, on the
+     * same basis the pricing policy uses; an amount approval is checked as a
+     * total once every line is priced.
+     */
+    private void assertWithinApprovedDiscount(DiscountRequest approval,
+                                              CreateSaleRequest.Line line) {
+        if (!approval.isPercentage()) {
+            return;
+        }
+        if (line.discountValue() == null || line.discountValue().signum() <= 0) {
+            return;
+        }
+        if (line.discountType() == DiscountType.AMOUNT) {
+            throw new ValidationException("Discount request " + approval.getId()
+                    + " approves a percentage; express the discount on item "
+                    + line.jewelleryItemId() + " as a percentage");
+        }
+        if (line.discountValue().compareTo(approval.getRequestedPercentage()) > 0) {
+            throw new ValidationException("Discount of " + line.discountValue() + "% on item "
+                    + line.jewelleryItemId() + " exceeds the approved "
+                    + approval.getRequestedPercentage() + "%");
+        }
     }
 
     private boolean hasDiscountApproval() {

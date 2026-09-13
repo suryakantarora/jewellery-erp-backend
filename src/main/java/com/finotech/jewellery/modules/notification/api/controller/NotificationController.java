@@ -1,8 +1,11 @@
 package com.finotech.jewellery.modules.notification.api.controller;
 
+import com.finotech.jewellery.modules.notification.api.request.RegisterDeviceRequest;
 import com.finotech.jewellery.modules.notification.api.request.TemplateRequest;
+import com.finotech.jewellery.modules.notification.api.response.DeviceResponse;
 import com.finotech.jewellery.modules.notification.api.response.NotificationResponse;
 import com.finotech.jewellery.modules.notification.api.response.NotificationResponse.TemplateResponse;
+import com.finotech.jewellery.modules.notification.application.service.NotificationDeviceService;
 import com.finotech.jewellery.modules.notification.application.service.NotificationInboxService;
 import com.finotech.jewellery.modules.notification.application.service.TemplateService;
 import com.finotech.jewellery.modules.notification.domain.enums.NotificationChannel;
@@ -22,6 +25,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -42,6 +46,7 @@ public class NotificationController {
 
     private final NotificationRepository notificationRepository;
     private final NotificationInboxService inboxService;
+    private final NotificationDeviceService deviceService;
     private final TemplateService templateService;
 
     @Operation(summary = "Search queued and delivered notifications")
@@ -88,6 +93,26 @@ public class NotificationController {
     @PostMapping("/mine/read-all")
     public ResponseEntity<ApiResponse<Integer>> markAllRead() {
         return ResponseEntity.ok(ApiResponse.ok(inboxService.markAllRead()));
+    }
+
+    @Operation(summary = "Register this device for push",
+            description = "Self-scoped like /mine: the device is bound to the caller. Upserts "
+                    + "by token, re-owning a token previously registered by another user, "
+                    + "so a handset that changes hands stops receiving its old owner's mail.")
+    @PostMapping("/devices")
+    public ResponseEntity<ApiResponse<DeviceResponse>> registerDevice(
+            @Valid @RequestBody RegisterDeviceRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(DeviceResponse.from(deviceService.register(request))));
+    }
+
+    @Operation(summary = "Unregister a push device",
+            description = "Removes the token if the caller owns it. Idempotent: an unknown "
+                    + "token also returns 204.")
+    @DeleteMapping("/devices/{token}")
+    public ResponseEntity<Void> unregisterDevice(@PathVariable String token) {
+        deviceService.unregister(token);
+        return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "List notification templates")

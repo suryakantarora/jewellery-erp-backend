@@ -32,6 +32,15 @@ public final class SecurityUtils {
     }
 
     /**
+     * The branch named by the request's {@code X-Branch-Id} header, already
+     * verified against the caller's branch grants. Empty when the header was
+     * not sent or outside a request. See {@link BranchContext}.
+     */
+    public static Optional<UUID> currentBranchId() {
+        return BranchContext.current();
+    }
+
+    /**
      * Guards branch-scoped operations: a user may only act inside branches
      * granted to them, unless they are a super administrator.
      */

@@ -1,6 +1,8 @@
 package com.finotech.jewellery.modules.identity.infrastructure.repository;
 
 import com.finotech.jewellery.modules.identity.domain.entity.User;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -32,4 +34,25 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Page<User> search(@Param("search") String search,
                       @Param("branchId") UUID branchId,
                       Pageable pageable);
+
+    @Query("select u.id from User u where lower(u.username) = lower(:username)")
+    Optional<UUID> findIdByUsernameIgnoreCase(@Param("username") String username);
+
+    /**
+     * Backs {@code UserDirectory}: who can be told about something. The
+     * permission join is a left join so a super-admin role with no explicit
+     * permission rows still qualifies — but only, like everyone else, when the
+     * user is assigned to one of the branches.
+     */
+    @Query("""
+            select distinct u.id from User u
+            join u.roles r
+            left join r.permissions p
+            join u.branchIds b
+            where u.status = com.finotech.jewellery.modules.identity.domain.enums.UserStatus.ACTIVE
+              and b in :branchIds
+              and (r.superAdmin = true or p.code = :permission)
+            """)
+    List<UUID> findActiveIdsWithPermissionInBranches(@Param("permission") String permission,
+                                                     @Param("branchIds") Collection<UUID> branchIds);
 }

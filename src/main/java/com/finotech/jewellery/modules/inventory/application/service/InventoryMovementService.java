@@ -131,6 +131,12 @@ public class InventoryMovementService {
         InventoryMovement saved = movementRepository.save(movement);
         auditService.record("MOVEMENT_CREATED", "InventoryMovement", saved.getId(), null,
                 MovementResponse.from(saved), to.branchId());
+        if (saved.getStatus() == MovementStatus.PENDING_APPROVAL) {
+            events.publish(new DomainEvents.TransferAwaitingApproval(saved.getId(),
+                    saved.getReferenceNumber(), saved.getFromBranchId(), saved.getToBranchId(),
+                    from == null ? null : from.name(), to.name(), saved.getLines().size(),
+                    false, null));
+        }
         return MovementResponse.from(saved);
     }
 
@@ -164,6 +170,18 @@ public class InventoryMovementService {
         auditService.record("MOVEMENT_APPROVED", "InventoryMovement", id, null,
                 Map.of("approvedBy", approver, "status", movement.getStatus()),
                 movement.getToBranchId());
+        if (movement.getStatus() == MovementStatus.APPROVED) {
+            events.publish(new DomainEvents.TransferDecided(movement.getId(),
+                    movement.getReferenceNumber(), movement.getToBranchId(),
+                    movement.getCreatedBy(), true, null));
+        } else {
+            // First of two signatures: ask the other approvers, not this one.
+            events.publish(new DomainEvents.TransferAwaitingApproval(movement.getId(),
+                    movement.getReferenceNumber(), movement.getFromBranchId(),
+                    movement.getToBranchId(), locationName(movement.getFromLocationId()),
+                    locationName(movement.getToLocationId()), movement.getLines().size(),
+                    true, approver));
+        }
         return MovementResponse.from(movement);
     }
 
@@ -177,6 +195,9 @@ public class InventoryMovementService {
         movement.setRejectionReason(request.reason());
         auditService.record("MOVEMENT_REJECTED", "InventoryMovement", id, null,
                 Map.of("reason", request.reason()), movement.getToBranchId());
+        events.publish(new DomainEvents.TransferDecided(movement.getId(),
+                movement.getReferenceNumber(), movement.getToBranchId(),
+                movement.getCreatedBy(), false, request.reason()));
         return MovementResponse.from(movement);
     }
 
@@ -301,6 +322,10 @@ public class InventoryMovementService {
                 .filter(l -> l.getJewelleryItemId().equals(itemId))
                 .findFirst()
                 .orElseThrow(() -> new NotFoundException("Item " + itemId + " is not on this movement"));
+    }
+
+    private String locationName(UUID locationId) {
+        return locationId == null ? null : organizationDirectory.requireLocation(locationId).name();
     }
 
     private boolean isDualAuthorizationRequired(InventoryMovement movement) {

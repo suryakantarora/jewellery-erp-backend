@@ -57,6 +57,9 @@ public class NotificationDeliveryExecutor {
         try {
             sender.send(notification);
             notification.markSent();
+        } catch (NotificationSender.NotificationCancelledException ex) {
+            log.debug("Cancelled notification {}: {}", notificationId, ex.getMessage());
+            notification.markCancelled(ex.getMessage());
         } catch (RuntimeException ex) {
             log.warn("Failed to deliver notification {}: {}", notificationId, ex.getMessage());
             notification.markFailed(ex.getMessage(), maxAttempts);

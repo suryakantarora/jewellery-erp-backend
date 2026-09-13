@@ -26,9 +26,11 @@ import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * Exchange and buyback of old jewellery.
@@ -70,6 +72,23 @@ public class ExchangeService {
     /** Step 1: the piece is taken in and described. */
     @Transactional
     public ExchangeResponse receive(ExchangeRequests.ReceiveRequest request) {
+        return receive(request, null);
+    }
+
+    /**
+     * Step 1 with retry protection.
+     *
+     * @param idempotencyKey optional client key; replaying the same key returns
+     *                       the intake already created instead of a duplicate
+     */
+    @Transactional
+    public ExchangeResponse receive(ExchangeRequests.ReceiveRequest request, String idempotencyKey) {
+        if (StringUtils.hasText(idempotencyKey)) {
+            var existing = intakeRepository.findByIdempotencyKey(idempotencyKey);
+            if (existing.isPresent()) {
+                return ExchangeResponse.from(existing.get());
+            }
+        }
         CustomerDirectory.CustomerView customer =
                 customerDirectory.requireTransactableCustomer(request.customerId());
         SecurityUtils.requireBranchAccess(request.branchId());
@@ -89,8 +108,9 @@ public class ExchangeService {
         intake.setReceivedDate(LocalDate.now());
         intake.setNotes(request.notes());
         intake.setStatus(ExchangeStatus.RECEIVED);
+        intake.setIdempotencyKey(StringUtils.hasText(idempotencyKey) ? idempotencyKey : null);
 
-        ExchangeIntake saved = intakeRepository.save(intake);
+        ExchangeIntake saved = persist(intake, idempotencyKey);
         auditService.record("EXCHANGE_RECEIVED", "ExchangeIntake", saved.getId(), null,
                 Map.of("type", saved.getExchangeType(), "customerId", String.valueOf(customer.id())),
                 saved.getBranchId());
@@ -279,6 +299,21 @@ public class ExchangeService {
         auditService.record("EXCHANGE_RETURNED_TO_CUSTOMER", "ExchangeIntake", id, null,
                 Map.of("reason", String.valueOf(reason)), intake.getBranchId());
         return ExchangeResponse.from(intake);
+    }
+
+    /**
+     * Same pattern as payments: the unique index on the key means a genuinely
+     * concurrent retry cannot insert a second row; the loser re-reads the winner.
+     */
+    private ExchangeIntake persist(ExchangeIntake intake, String idempotencyKey) {
+        try {
+            return intakeRepository.saveAndFlush(intake);
+        } catch (DataIntegrityViolationException ex) {
+            if (StringUtils.hasText(idempotencyKey)) {
+                return intakeRepository.findByIdempotencyKey(idempotencyKey).orElseThrow(() -> ex);
+            }
+            throw ex;
+        }
     }
 
     private ExchangeIntake requireIntake(UUID id) {

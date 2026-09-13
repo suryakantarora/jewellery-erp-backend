@@ -4,7 +4,10 @@ import com.finotech.jewellery.modules.warehouse.application.BinDirectory;
 import com.finotech.jewellery.modules.warehouse.domain.entity.StorageBin;
 import com.finotech.jewellery.modules.warehouse.infrastructure.repository.StorageBinRepository;
 import com.finotech.jewellery.shared.exception.NotFoundException;
+import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,5 +35,15 @@ public class BinDirectoryService implements BinDirectory {
                 .orElseThrow(() -> new NotFoundException("Storage bin not found"));
         return new BinView(bin.getId(), bin.getLocationId(), bin.getCode(), bin.getName(),
                 bin.isActive());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, String> codesFor(Collection<UUID> binIds) {
+        if (binIds == null || binIds.isEmpty()) {
+            return Map.of();
+        }
+        return binRepository.findAllById(binIds).stream()
+                .collect(Collectors.toMap(StorageBin::getId, StorageBin::getCode));
     }
 }

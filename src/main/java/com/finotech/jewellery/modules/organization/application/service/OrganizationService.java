@@ -20,6 +20,8 @@ import com.finotech.jewellery.shared.common.PageResponse;
 import com.finotech.jewellery.shared.exception.ConflictException;
 import com.finotech.jewellery.shared.exception.NotFoundException;
 import com.finotech.jewellery.shared.exception.ValidationException;
+import com.finotech.jewellery.shared.security.AuthenticatedUser;
+import com.finotech.jewellery.shared.security.SecurityUtils;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -80,6 +82,33 @@ public class OrganizationService implements OrganizationDirectory {
     @Transactional(readOnly = true)
     public PageResponse<BranchResponse> searchBranches(UUID companyId, String search, Pageable pageable) {
         return PageResponse.of(branchRepository.search(companyId, search, pageable), BranchResponse::from);
+    }
+
+    /**
+     * The branches the signed-in user may work in.
+     *
+     * <p>Needs no permission. {@code ORGANIZATION_VIEW} governs *browsing the
+     * organisation* — an administrative concern — but every member of staff has
+     * to know which branches are theirs simply to start working. Gating this on
+     * it meant a sales executive, who has no reason to browse the org chart,
+     * could not complete sign-in at all: the app cannot establish a session
+     * without a branch.
+     *
+     * <p>A super administrator has an empty branch set precisely because they
+     * may act everywhere, so they get all active branches.
+     */
+    @Transactional(readOnly = true)
+    public List<BranchResponse> myBranches() {
+        AuthenticatedUser user = SecurityUtils.requireCurrentUser();
+        if (user.superAdmin()) {
+            return branchRepository.findAll().stream()
+                    .filter(b -> b.getStatus() == OrganizationStatus.ACTIVE)
+                    .map(BranchResponse::from)
+                    .toList();
+        }
+        return branchRepository.findAllById(user.branchIds()).stream()
+                .map(BranchResponse::from)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -210,6 +239,17 @@ public class OrganizationService implements OrganizationDirectory {
     @Transactional(readOnly = true)
     public boolean branchExists(UUID branchId) {
         return branchId != null && branchRepository.existsById(branchId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.Map<UUID, String> branchNames(java.util.Collection<UUID> branchIds) {
+        if (branchIds == null || branchIds.isEmpty()) {
+            return java.util.Map.of();
+        }
+        java.util.Map<UUID, String> names = new java.util.HashMap<>();
+        branchRepository.findAllById(branchIds).forEach(b -> names.put(b.getId(), b.getName()));
+        return names;
     }
 
     // ---------- helpers ----------

@@ -1,5 +1,7 @@
 package com.finotech.jewellery.modules.warehouse.application;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -12,6 +14,9 @@ public interface BinDirectory {
 
     /** @return a lightweight view of a bin, or throws if it does not exist */
     BinView requireBin(UUID binId);
+
+    /** Bin codes for a batch of ids, so a list page labels its bins in one query. */
+    Map<UUID, String> codesFor(Collection<UUID> binIds);
 
     record BinView(UUID id, UUID locationId, String code, String name, boolean active) {
     }

@@ -3,6 +3,7 @@ package com.finotech.jewellery.modules.exchange.infrastructure.repository;
 import com.finotech.jewellery.modules.exchange.domain.entity.ExchangeIntake;
 import com.finotech.jewellery.modules.exchange.domain.enums.ExchangeStatus;
 import com.finotech.jewellery.modules.exchange.domain.enums.ExchangeType;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -11,6 +12,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface ExchangeIntakeRepository extends JpaRepository<ExchangeIntake, UUID> {
+
+    Optional<ExchangeIntake> findByIdempotencyKey(String idempotencyKey);
 
     @Query("""
             select e from ExchangeIntake e

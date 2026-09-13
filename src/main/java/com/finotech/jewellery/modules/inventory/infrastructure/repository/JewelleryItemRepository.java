@@ -3,6 +3,8 @@ package com.finotech.jewellery.modules.inventory.infrastructure.repository;
 import com.finotech.jewellery.modules.inventory.domain.entity.JewelleryItem;
 import com.finotech.jewellery.modules.inventory.domain.enums.ItemStatus;
 import jakarta.persistence.LockModeType;
+import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -56,6 +58,8 @@ public interface JewelleryItemRepository extends JpaRepository<JewelleryItem, UU
               and (:metalId is null or i.metalId = :metalId)
               and (:purityId is null or i.purityId = :purityId)
               and (:binId is null or i.binId = :binId)
+              and (:minPrice is null or i.currentPrice >= :minPrice)
+              and (:maxPrice is null or i.currentPrice <= :maxPrice)
             """)
     Page<JewelleryItem> search(@Param("search") String search,
                                @Param("productId") UUID productId,
@@ -65,7 +69,36 @@ public interface JewelleryItemRepository extends JpaRepository<JewelleryItem, UU
                                @Param("metalId") UUID metalId,
                                @Param("purityId") UUID purityId,
                                @Param("binId") UUID binId,
+                               @Param("minPrice") BigDecimal minPrice,
+                               @Param("maxPrice") BigDecimal maxPrice,
                                Pageable pageable);
+
+    /**
+     * Every item any of the given tags points at, in one query. Item codes are
+     * compared case-insensitively, as {@code findByItemCodeIgnoreCase} does;
+     * the physical tags are exact, as they are everywhere else.
+     */
+    @Query("""
+            select i from JewelleryItem i
+            where i.rfidTag in :tags
+               or i.qrCode in :tags
+               or i.barcode in :tags
+               or upper(i.itemCode) in :upperTags
+            """)
+    List<JewelleryItem> findAllByAnyTag(@Param("tags") Collection<String> tags,
+                                        @Param("upperTags") Collection<String> upperTags);
+
+    /** Item counts of one product per branch and status, for the availability view. */
+    @Query("""
+            select new com.finotech.jewellery.modules.inventory.infrastructure.repository.BranchStatusCount(
+                i.currentBranchId, i.status, count(i))
+            from JewelleryItem i
+            where i.productId = :productId
+              and i.currentBranchId in :branchIds
+            group by i.currentBranchId, i.status
+            """)
+    List<BranchStatusCount> countByBranchAndStatus(@Param("productId") UUID productId,
+                                                   @Param("branchIds") Collection<UUID> branchIds);
 
     long countByCurrentLocationIdAndStatus(UUID locationId, ItemStatus status);
 }

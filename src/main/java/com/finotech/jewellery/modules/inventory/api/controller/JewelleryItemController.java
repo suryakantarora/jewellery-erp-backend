@@ -5,11 +5,14 @@ import com.finotech.jewellery.modules.inventory.api.request.AssignBinRequest;
 import com.finotech.jewellery.modules.inventory.api.request.ChangeStatusRequest;
 import com.finotech.jewellery.modules.inventory.api.request.CreateItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.ReserveItemRequest;
+import com.finotech.jewellery.modules.inventory.api.request.ResolveTagsRequest;
 import com.finotech.jewellery.modules.inventory.api.request.TagItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.UpdateItemRequest;
 import com.finotech.jewellery.modules.inventory.api.response.ItemImageResponse;
 import com.finotech.jewellery.modules.inventory.api.response.ItemPassportResponse;
 import com.finotech.jewellery.modules.inventory.api.response.JewelleryItemResponse;
+import com.finotech.jewellery.modules.inventory.api.response.ProductAvailabilityResponse;
+import com.finotech.jewellery.modules.inventory.api.response.TagResolutionResponse;
 import com.finotech.jewellery.modules.inventory.application.service.JewelleryItemService;
 import com.finotech.jewellery.modules.inventory.domain.enums.ItemStatus;
 import com.finotech.jewellery.shared.common.ApiResponse;
@@ -17,6 +20,7 @@ import com.finotech.jewellery.shared.common.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -60,9 +64,31 @@ public class JewelleryItemController {
             @RequestParam(required = false) UUID metalId,
             @RequestParam(required = false) UUID purityId,
             @RequestParam(required = false) UUID binId,
+            @RequestParam(required = false) BigDecimal minPrice,
+            @RequestParam(required = false) BigDecimal maxPrice,
             @PageableDefault(size = 20, sort = "itemCode") Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.ok(itemService.search(search, productId, status,
-                locationId, branchId, metalId, purityId, binId, pageable)));
+                locationId, branchId, metalId, purityId, binId, minPrice, maxPrice, pageable)));
+    }
+
+    @Operation(summary = "Resolve a batch of scanned tags to items",
+            description = "Each tag may be an RFID tag, QR code, barcode or item code. "
+                    + "Tags nobody recognises come back under 'unresolved'. Max 500 per call.")
+    @PostMapping("/items/by-tags")
+    @PreAuthorize(VIEW)
+    public ResponseEntity<ApiResponse<TagResolutionResponse>> byTags(
+            @Valid @RequestBody ResolveTagsRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(itemService.resolveTags(request)));
+    }
+
+    @Operation(summary = "Stock of a product per branch",
+            description = "Lists every branch the caller may see, with zeros where the "
+                    + "branch holds none.")
+    @GetMapping("/availability")
+    @PreAuthorize(VIEW)
+    public ResponseEntity<ApiResponse<ProductAvailabilityResponse>> availability(
+            @RequestParam UUID productId) {
+        return ResponseEntity.ok(ApiResponse.ok(itemService.availability(productId)));
     }
 
     @Operation(summary = "Get an item")

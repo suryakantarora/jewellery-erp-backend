@@ -88,6 +88,15 @@ public class OrganizationController {
                 organizationService.searchBranches(companyId, search, pageable)));
     }
 
+    @Operation(summary = "The branches the signed-in user may work in",
+            description = "Needs no permission: every member of staff must know their own "
+                    + "branches to start working, and the app cannot establish a session "
+                    + "without one. ORGANIZATION_VIEW governs browsing the organisation.")
+    @GetMapping("/branches/mine")
+    public ResponseEntity<ApiResponse<List<BranchResponse>>> myBranches() {
+        return ResponseEntity.ok(ApiResponse.ok(organizationService.myBranches()));
+    }
+
     @Operation(summary = "Get a branch")
     @GetMapping("/branches/{id}")
     @PreAuthorize(VIEW)

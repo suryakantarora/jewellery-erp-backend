@@ -18,6 +18,8 @@ public interface RepairRequestRepository extends JpaRepository<RepairRequest, UU
 
     Optional<RepairRequest> findByRequestNumberIgnoreCase(String requestNumber);
 
+    Optional<RepairRequest> findByIdempotencyKey(String idempotencyKey);
+
     @Query("""
             select r from RepairRequest r
             where (:status is null or r.status = :status)

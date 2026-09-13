@@ -15,6 +15,9 @@ public interface OrganizationDirectory {
 
     boolean branchExists(UUID branchId);
 
+    /** Display names for a set of branches, for list rows; unknown ids are omitted. */
+    java.util.Map<UUID, String> branchNames(java.util.Collection<UUID> branchIds);
+
     /** Stock-holding locations that have a low-stock threshold configured. */
     java.util.List<LocationView> monitoredLocations();
 

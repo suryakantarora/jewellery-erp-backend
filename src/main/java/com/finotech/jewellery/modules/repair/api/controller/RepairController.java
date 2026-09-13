@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -64,13 +65,15 @@ public class RepairController {
         return ResponseEntity.ok(ApiResponse.ok(repairService.overdue(branchId)));
     }
 
-    @Operation(summary = "Step 1 — take in a piece for repair and record its condition")
+    @Operation(summary = "Step 1 — take in a piece for repair and record its condition",
+            description = "Send X-Idempotency-Key to make retries safe.")
     @PostMapping
     @PreAuthorize(PROCESS)
     public ResponseEntity<ApiResponse<RepairResponse>> receive(
-            @Valid @RequestBody RepairRequests.ReceiveRequest request) {
+            @Valid @RequestBody RepairRequests.ReceiveRequest request,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok(repairService.receive(request)));
+                .body(ApiResponse.ok(repairService.receive(request, idempotencyKey)));
     }
 
     @Operation(summary = "Step 2 — record inspection findings")

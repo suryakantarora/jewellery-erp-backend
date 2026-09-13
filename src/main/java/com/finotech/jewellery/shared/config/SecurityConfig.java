@@ -2,6 +2,7 @@ package com.finotech.jewellery.shared.config;
 
 import com.finotech.jewellery.shared.exception.ApiError;
 import com.finotech.jewellery.shared.exception.ErrorCode;
+import com.finotech.jewellery.shared.security.BranchContextFilter;
 import com.finotech.jewellery.shared.security.JwtAuthenticationFilter;
 import com.finotech.jewellery.shared.security.SecurityProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,7 +53,9 @@ public class SecurityConfig {
                                 write(response, ErrorCode.FORBIDDEN,
                                         "You do not have permission to perform this action",
                                         request.getRequestURI())))
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // Branch header scoping needs the principal, so it follows JWT auth.
+                .addFilterAfter(new BranchContextFilter(objectMapper), JwtAuthenticationFilter.class);
 
         return http.build();
     }

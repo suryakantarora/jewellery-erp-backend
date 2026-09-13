@@ -8,38 +8,50 @@ import com.finotech.jewellery.modules.inventory.api.request.AssignBinRequest;
 import com.finotech.jewellery.modules.inventory.api.request.ChangeStatusRequest;
 import com.finotech.jewellery.modules.inventory.api.request.CreateItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.ReserveItemRequest;
+import com.finotech.jewellery.modules.inventory.api.request.ResolveTagsRequest;
 import com.finotech.jewellery.modules.inventory.api.request.TagItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.UpdateItemRequest;
 import com.finotech.jewellery.modules.inventory.api.response.ItemImageResponse;
 import com.finotech.jewellery.modules.inventory.api.response.ItemPassportResponse;
 import com.finotech.jewellery.modules.inventory.api.response.JewelleryItemResponse;
 import com.finotech.jewellery.modules.inventory.api.response.LifecycleEventResponse;
+import com.finotech.jewellery.modules.inventory.api.response.ProductAvailabilityResponse;
+import com.finotech.jewellery.modules.inventory.api.response.TagResolutionResponse;
 import com.finotech.jewellery.modules.inventory.application.InventoryOperations;
 import com.finotech.jewellery.modules.inventory.domain.entity.ItemImage;
 import com.finotech.jewellery.modules.inventory.domain.entity.JewelleryItem;
 import com.finotech.jewellery.modules.inventory.domain.enums.ItemStatus;
 import com.finotech.jewellery.modules.inventory.domain.enums.LifecycleEventType;
+import com.finotech.jewellery.modules.inventory.infrastructure.repository.BranchStatusCount;
 import com.finotech.jewellery.modules.inventory.infrastructure.repository.ItemImageRepository;
 import com.finotech.jewellery.modules.inventory.infrastructure.repository.ItemLifecycleEventRepository;
 import com.finotech.jewellery.modules.inventory.infrastructure.repository.JewelleryItemRepository;
 import com.finotech.jewellery.modules.metal.application.MetalRateProvider;
 import com.finotech.jewellery.modules.organization.application.OrganizationDirectory;
+import com.finotech.jewellery.modules.organization.application.OrganizationNames;
 import com.finotech.jewellery.modules.product.application.ProductCatalog;
 import com.finotech.jewellery.shared.audit.AuditService;
 import com.finotech.jewellery.shared.common.PageResponse;
 import com.finotech.jewellery.shared.exception.ConflictException;
 import com.finotech.jewellery.shared.exception.NotFoundException;
 import com.finotech.jewellery.shared.exception.ValidationException;
+import com.finotech.jewellery.shared.security.AuthenticatedUser;
 import com.finotech.jewellery.shared.security.SecurityUtils;
 import com.finotech.jewellery.shared.utils.CodeGenerator;
 import com.finotech.jewellery.shared.utils.MoneyUtils;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -65,6 +77,8 @@ public class JewelleryItemService implements InventoryOperations {
     private final GemstoneService stoneRegistry;
     private final ItemImageRepository imageRepository;
     private final BinDirectory binDirectory;
+    private final OrganizationNames organizationNames;
+    private final ItemDisplayNameResolver displayNames;
     private final AuditService auditService;
 
     // ---------- queries ----------
@@ -74,13 +88,28 @@ public class JewelleryItemService implements InventoryOperations {
                                                       UUID locationId, UUID branchId, UUID metalId,
                                                       UUID purityId, UUID binId,
                                                       Pageable pageable) {
-        return PageResponse.of(itemRepository.search(search, productId, status, locationId, branchId,
-                metalId, purityId, binId, pageable), JewelleryItemResponse::from);
+        return search(search, productId, status, locationId, branchId, metalId, purityId, binId,
+                null, null, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<JewelleryItemResponse> search(String search, UUID productId, ItemStatus status,
+                                                      UUID locationId, UUID branchId, UUID metalId,
+                                                      UUID purityId, UUID binId,
+                                                      BigDecimal minPrice, BigDecimal maxPrice,
+                                                      Pageable pageable) {
+        if (minPrice != null && maxPrice != null && minPrice.compareTo(maxPrice) > 0) {
+            throw new ValidationException("minPrice must not exceed maxPrice");
+        }
+        Page<JewelleryItem> page = itemRepository.search(search, productId, status, locationId,
+                branchId, metalId, purityId, binId, minPrice, maxPrice, pageable);
+        JewelleryItemResponse.DisplayNames names = displayNames.resolve(page.getContent());
+        return PageResponse.of(page, item -> JewelleryItemResponse.from(item, names));
     }
 
     @Transactional(readOnly = true)
     public JewelleryItemResponse get(UUID id) {
-        return JewelleryItemResponse.from(requireItemEntity(id));
+        return respond(requireItemEntity(id));
     }
 
     /** Resolves an item by any of its physical tags — used by POS scanners. */
@@ -90,8 +119,105 @@ public class JewelleryItemService implements InventoryOperations {
                 .or(() -> itemRepository.findByBarcode(tag))
                 .or(() -> itemRepository.findByQrCode(tag))
                 .or(() -> itemRepository.findByItemCodeIgnoreCase(tag))
-                .map(JewelleryItemResponse::from)
+                .map(this::respond)
                 .orElseThrow(() -> new NotFoundException("No item found for tag: " + tag));
+    }
+
+    /**
+     * Resolves a whole sweep of scanned tags at once.
+     *
+     * <p>One query fetches every candidate item; the tags are then matched back
+     * in memory so the response says which tag found which item. Physical tags
+     * match exactly, item codes case-insensitively, mirroring {@link #findByTag}.
+     * Duplicate scans collapse to one entry, and the input order is kept so the
+     * app can show results in the order the gate read them.
+     */
+    @Transactional(readOnly = true)
+    public TagResolutionResponse resolveTags(ResolveTagsRequest request) {
+        Set<String> tags = new LinkedHashSet<>();
+        for (String tag : request.tags()) {
+            if (StringUtils.hasText(tag)) {
+                tags.add(tag.trim());
+            }
+        }
+        if (tags.isEmpty()) {
+            throw new ValidationException("At least one tag is required");
+        }
+        List<String> upper = tags.stream().map(String::toUpperCase).toList();
+        List<JewelleryItem> items = itemRepository.findAllByAnyTag(tags, upper);
+        JewelleryItemResponse.DisplayNames names = displayNames.resolve(items);
+
+        Map<String, JewelleryItem> byExactTag = new HashMap<>();
+        Map<String, JewelleryItem> byItemCode = new HashMap<>();
+        for (JewelleryItem item : items) {
+            if (item.getRfidTag() != null) {
+                byExactTag.put(item.getRfidTag(), item);
+            }
+            if (item.getQrCode() != null) {
+                byExactTag.put(item.getQrCode(), item);
+            }
+            if (item.getBarcode() != null) {
+                byExactTag.put(item.getBarcode(), item);
+            }
+            byItemCode.put(item.getItemCode().toUpperCase(), item);
+        }
+
+        List<TagResolutionResponse.ResolvedTag> resolved = new ArrayList<>();
+        List<String> unresolved = new ArrayList<>();
+        for (String tag : tags) {
+            JewelleryItem match = byExactTag.get(tag);
+            if (match == null) {
+                match = byItemCode.get(tag.toUpperCase());
+            }
+            if (match == null) {
+                unresolved.add(tag);
+            } else {
+                resolved.add(new TagResolutionResponse.ResolvedTag(tag,
+                        JewelleryItemResponse.from(match, names)));
+            }
+        }
+        return new TagResolutionResponse(resolved, unresolved);
+    }
+
+    /**
+     * Stock of one product per branch, limited to the branches the caller may
+     * see: every active branch for a super administrator, otherwise the user's
+     * own. A branch the caller can see but that holds nothing is still listed
+     * with zeros — "0 in Pakse" is the answer the sales floor is asking for.
+     */
+    @Transactional(readOnly = true)
+    public ProductAvailabilityResponse availability(UUID productId) {
+        ProductCatalog.ProductView product = productCatalog.requireProduct(productId);
+        AuthenticatedUser user = SecurityUtils.requireCurrentUser();
+        List<OrganizationNames.BranchRef> branches = user.superAdmin()
+                ? organizationNames.activeBranches()
+                : organizationNames.branches(user.branchIds());
+        if (branches.isEmpty()) {
+            return new ProductAvailabilityResponse(product.id(), product.name(), List.of());
+        }
+
+        List<UUID> branchIds = branches.stream().map(OrganizationNames.BranchRef::id).toList();
+        Map<UUID, long[]> counts = new HashMap<>();
+        for (BranchStatusCount row : itemRepository.countByBranchAndStatus(productId, branchIds)) {
+            long[] tally = counts.computeIfAbsent(row.branchId(), k -> new long[2]);
+            if (row.status() == ItemStatus.AVAILABLE) {
+                tally[0] += row.count();
+            }
+            if (row.status() != ItemStatus.SOLD && row.status() != ItemStatus.SCRAPPED) {
+                tally[1] += row.count();
+            }
+        }
+
+        List<ProductAvailabilityResponse.BranchAvailability> rows = branches.stream()
+                .sorted(Comparator.comparing(OrganizationNames.BranchRef::name,
+                        String.CASE_INSENSITIVE_ORDER))
+                .map(b -> {
+                    long[] tally = counts.getOrDefault(b.id(), new long[2]);
+                    return new ProductAvailabilityResponse.BranchAvailability(
+                            b.id(), b.name(), tally[0], tally[1]);
+                })
+                .toList();
+        return new ProductAvailabilityResponse(product.id(), product.name(), rows);
     }
 
     @Transactional(readOnly = true)
@@ -100,7 +226,7 @@ public class JewelleryItemService implements InventoryOperations {
         List<LifecycleEventResponse> history = lifecycleRepository
                 .findAllByJewelleryItemIdOrderByOccurredAtAsc(id).stream()
                 .map(LifecycleEventResponse::from).toList();
-        return new ItemPassportResponse(JewelleryItemResponse.from(item),
+        return new ItemPassportResponse(respond(item),
                 stoneRegistry.stonesOfItem(id), history);
     }
 
@@ -139,6 +265,7 @@ public class JewelleryItemService implements InventoryOperations {
         JewelleryItem item = new JewelleryItem();
         item.setItemCode(itemCode);
         item.setProductId(product.id());
+        item.setDesignId(product.designId());
         item.setMetalId(metalId);
         item.setPurityId(purityId);
         item.setGrossWeight(MoneyUtils.weight(request.grossWeight()));
@@ -167,7 +294,7 @@ public class JewelleryItemService implements InventoryOperations {
                 null, location.id(), "Product", product.sku(), "Item created");
         auditService.record("ITEM_CREATED", "JewelleryItem", saved.getId(), null,
                 JewelleryItemResponse.from(saved), location.branchId());
-        return JewelleryItemResponse.from(saved);
+        return respond(saved);
     }
 
     @Transactional
@@ -197,7 +324,7 @@ public class JewelleryItemService implements InventoryOperations {
         JewelleryItemResponse after = JewelleryItemResponse.from(item);
         auditService.record("ITEM_UPDATED", "JewelleryItem", id, before, after,
                 item.getCurrentBranchId());
-        return after;
+        return respond(item);
     }
 
     @Transactional
@@ -218,7 +345,7 @@ public class JewelleryItemService implements InventoryOperations {
         lifecycle.record(id, LifecycleEventType.TAGGED, "Physical tags attached");
         auditService.record("ITEM_TAGGED", "JewelleryItem", id, null,
                 JewelleryItemResponse.from(item), item.getCurrentBranchId());
-        return JewelleryItemResponse.from(item);
+        return respond(item);
     }
 
     /**
@@ -239,7 +366,7 @@ public class JewelleryItemService implements InventoryOperations {
             lifecycle.record(id, LifecycleEventType.LOCATION_CHANGED, "Removed from bin");
             auditService.record("ITEM_BIN_CLEARED", "JewelleryItem", id, null, null,
                     item.getCurrentBranchId());
-            return JewelleryItemResponse.from(item);
+            return respond(item);
         }
 
         BinDirectory.BinView bin = binDirectory.requireBin(binId);
@@ -257,7 +384,7 @@ public class JewelleryItemService implements InventoryOperations {
                 "Placed in bin " + bin.code());
         auditService.record("ITEM_BIN_ASSIGNED", "JewelleryItem", id, null,
                 Map.of("binId", binId, "binCode", bin.code()), item.getCurrentBranchId());
-        return JewelleryItemResponse.from(item);
+        return respond(item);
     }
 
     @Transactional(readOnly = true)
@@ -354,7 +481,7 @@ public class JewelleryItemService implements InventoryOperations {
                 "Quality checked and released into stock");
         auditService.record("ITEM_RELEASED_TO_STOCK", "JewelleryItem", id, null, null,
                 item.getCurrentBranchId());
-        return JewelleryItemResponse.from(item);
+        return respond(item);
     }
 
     /** Manual status correction. Restricted and always audited. */
@@ -373,7 +500,7 @@ public class JewelleryItemService implements InventoryOperations {
                 java.util.Map.of("status", from),
                 java.util.Map.of("status", request.targetStatus(), "reason", request.reason()),
                 item.getCurrentBranchId());
-        return JewelleryItemResponse.from(item);
+        return respond(item);
     }
 
     // ---------- reservations ----------
@@ -383,7 +510,7 @@ public class JewelleryItemService implements InventoryOperations {
         int hours = request.holdHours() == null ? DEFAULT_HOLD_HOURS : request.holdHours();
         reserve(request.jewelleryItemId(), request.customerId(), hours);
         JewelleryItem item = requireItemEntity(request.jewelleryItemId());
-        return JewelleryItemResponse.from(item);
+        return respond(item);
     }
 
     @Override
@@ -490,7 +617,7 @@ public class JewelleryItemService implements InventoryOperations {
     public List<ItemView> itemsAtLocation(UUID locationId) {
         // Only stock that should physically be there: items in transit have left.
         return itemRepository.search(null, null, null, locationId, null, null, null, null,
-                        org.springframework.data.domain.Pageable.unpaged())
+                        null, null, org.springframework.data.domain.Pageable.unpaged())
                 .getContent().stream()
                 .filter(item -> item.getStatus().isInStock())
                 .map(this::toView)
@@ -562,6 +689,11 @@ public class JewelleryItemService implements InventoryOperations {
 
     JewelleryItem requireItemEntity(UUID id) {
         return itemRepository.findById(id).orElseThrow(() -> NotFoundException.of("JewelleryItem", id));
+    }
+
+    /** The response the client sees: the item with its references labelled. */
+    private JewelleryItemResponse respond(JewelleryItem item) {
+        return JewelleryItemResponse.from(item, displayNames.resolve(List.of(item)));
     }
 
     JewelleryItem lockItem(UUID id) {

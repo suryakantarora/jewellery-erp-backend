@@ -48,7 +48,9 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
      * branch broadcasts (operational events such as a transfer or a low-stock
      * warning, which have no single owner) for the branches the user works in.
      * Customer-facing messages are excluded outright — they are somebody else's
-     * mail, and this endpoint must never expose them.
+     * mail, and this endpoint must never expose them. Only IN_APP rows qualify:
+     * an event with both an IN_APP and a PUSH template queues two rows, and the
+     * PUSH one is a delivery record for the phone, not a second inbox entry.
      *
      * <p>{@code allBranches} exists for super administrators, whose branch set
      * is empty precisely because they may act everywhere; without it an empty
@@ -57,6 +59,7 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     @Query("""
             select n from Notification n
             where n.recipientType = com.finotech.jewellery.modules.notification.domain.enums.RecipientType.USER
+              and n.channel = com.finotech.jewellery.modules.notification.domain.enums.NotificationChannel.IN_APP
               and (n.recipientId = :userId
                    or (n.recipientId is null
                        and (:allBranches = true or n.branchId in :branchIds)))
@@ -74,6 +77,7 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     @Query("""
             select count(n) from Notification n
             where n.recipientType = com.finotech.jewellery.modules.notification.domain.enums.RecipientType.USER
+              and n.channel = com.finotech.jewellery.modules.notification.domain.enums.NotificationChannel.IN_APP
               and (n.recipientId = :userId
                    or (n.recipientId is null
                        and (:allBranches = true or n.branchId in :branchIds)))

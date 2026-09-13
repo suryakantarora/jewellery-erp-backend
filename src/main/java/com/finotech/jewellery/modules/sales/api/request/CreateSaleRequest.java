@@ -14,6 +14,10 @@ import java.util.UUID;
 /**
  * Opens a sale. Each line is priced by the pricing engine at this moment and
  * the result is frozen onto the sale.
+ *
+ * @param discountRequestId optional approved discount request that authorises
+ *                          the line discounts on this sale, for callers who
+ *                          do not hold DISCOUNT_APPROVE themselves
  */
 public record CreateSaleRequest(@NotNull UUID customerId,
                                 @NotNull UUID branchId,
@@ -24,7 +28,16 @@ public record CreateSaleRequest(@NotNull UUID customerId,
                                 /** Loyalty points to spend against this sale. */
                                 @PositiveOrZero Long redeemPoints,
                                 @Size(max = 500) String notes,
-                                @NotEmpty @Valid List<Line> lines) {
+                                @NotEmpty @Valid List<Line> lines,
+                                UUID discountRequestId) {
+
+    /** Shape before discount requests existed; kept for existing callers. */
+    public CreateSaleRequest(UUID customerId, UUID branchId, UUID locationId, UUID quotationId,
+                             UUID salespersonId, BigDecimal exchangeCredit, Long redeemPoints,
+                             String notes, List<Line> lines) {
+        this(customerId, branchId, locationId, quotationId, salespersonId, exchangeCredit,
+                redeemPoints, notes, lines, null);
+    }
 
     public record Line(@NotNull UUID jewelleryItemId,
                        DiscountType discountType,

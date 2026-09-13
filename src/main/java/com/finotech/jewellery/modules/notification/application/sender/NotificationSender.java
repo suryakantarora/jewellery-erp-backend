@@ -24,4 +24,14 @@ public interface NotificationSender {
             super(message);
         }
     }
+
+    /**
+     * The message can never be delivered on this channel — there is nobody at
+     * the other end — so the queue must stop rather than retry.
+     */
+    class NotificationCancelledException extends RuntimeException {
+        public NotificationCancelledException(String message) {
+            super(message);
+        }
+    }
 }
