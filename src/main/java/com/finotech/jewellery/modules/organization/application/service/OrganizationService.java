@@ -25,6 +25,7 @@ import com.finotech.jewellery.shared.security.SecurityUtils;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,14 +46,21 @@ public class OrganizationService implements OrganizationDirectory {
 
     // ---------- company ----------
 
+    /**
+     * Every company for a platform-level super administrator; otherwise only
+     * the caller's own. Another tenant's existence is not for a tenant to see.
+     */
     @Transactional(readOnly = true)
     public List<CompanyResponse> listCompanies() {
-        return companyRepository.findAll().stream().map(CompanyResponse::from).toList();
+        UUID scope = SecurityUtils.currentCompanyIdOrNull();
+        return companyRepository.findAll().stream()
+                .filter(c -> scope == null || c.getId().equals(scope))
+                .map(CompanyResponse::from).toList();
     }
 
     @Transactional(readOnly = true)
     public CompanyResponse getCompany(UUID id) {
-        return CompanyResponse.from(requireCompany(id));
+        return CompanyResponse.from(requireVisibleCompany(id));
     }
 
     @Transactional
@@ -69,7 +77,7 @@ public class OrganizationService implements OrganizationDirectory {
 
     @Transactional
     public CompanyResponse updateCompany(UUID id, CompanyRequest request) {
-        Company company = requireCompany(id);
+        Company company = requireVisibleCompany(id);
         CompanyResponse before = CompanyResponse.from(company);
         applyCompany(company, request);
         CompanyResponse after = CompanyResponse.from(company);
@@ -79,9 +87,15 @@ public class OrganizationService implements OrganizationDirectory {
 
     // ---------- branch ----------
 
+    /** Branches of the caller's company; a super administrator may filter by any. */
     @Transactional(readOnly = true)
     public PageResponse<BranchResponse> searchBranches(UUID companyId, String search, Pageable pageable) {
-        return PageResponse.of(branchRepository.search(companyId, search, pageable), BranchResponse::from);
+        UUID scope = SecurityUtils.currentCompanyIdOrNull();
+        if (scope != null && companyId != null && !scope.equals(companyId)) {
+            return PageResponse.of(Page.empty(pageable), BranchResponse::from);
+        }
+        UUID effective = scope != null ? scope : companyId;
+        return PageResponse.of(branchRepository.search(effective, search, pageable), BranchResponse::from);
     }
 
     /**
@@ -103,17 +117,18 @@ public class OrganizationService implements OrganizationDirectory {
         if (user.superAdmin()) {
             return branchRepository.findAll().stream()
                     .filter(b -> b.getStatus() == OrganizationStatus.ACTIVE)
+                    .filter(b -> user.companyId() == null || b.getCompany().getId().equals(user.companyId()))
                     .map(BranchResponse::from)
                     .toList();
         }
-        return branchRepository.findAllById(user.branchIds()).stream()
+        return branchRepository.findAllByIdInCompany(user.branchIds(), user.companyId()).stream()
                 .map(BranchResponse::from)
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public BranchResponse getBranch(UUID id) {
-        return BranchResponse.from(requireBranch(id));
+        return BranchResponse.from(requireVisibleBranch(id));
     }
 
     @Transactional
@@ -122,7 +137,7 @@ public class OrganizationService implements OrganizationDirectory {
             throw new ConflictException("Branch code already exists: " + request.code());
         }
         Branch branch = new Branch();
-        branch.setCompany(requireCompany(request.companyId()));
+        branch.setCompany(requireVisibleCompany(request.companyId()));
         applyBranch(branch, request);
         Branch saved = branchRepository.save(branch);
         auditService.record("BRANCH_CREATED", "Branch", saved.getId(), null,
@@ -132,7 +147,7 @@ public class OrganizationService implements OrganizationDirectory {
 
     @Transactional
     public BranchResponse updateBranch(UUID id, BranchRequest request) {
-        Branch branch = requireBranch(id);
+        Branch branch = requireVisibleBranch(id);
         BranchResponse before = BranchResponse.from(branch);
         if (!branch.getCompany().getId().equals(request.companyId())) {
             throw new ValidationException("A branch cannot be moved to another company");
@@ -145,7 +160,7 @@ public class OrganizationService implements OrganizationDirectory {
 
     @Transactional
     public void deactivateBranch(UUID id) {
-        Branch branch = requireBranch(id);
+        Branch branch = requireVisibleBranch(id);
         branch.setStatus(OrganizationStatus.INACTIVE);
         auditService.record("BRANCH_DEACTIVATED", "Branch", id, null, null, id);
     }
@@ -154,6 +169,7 @@ public class OrganizationService implements OrganizationDirectory {
 
     @Transactional(readOnly = true)
     public List<LocationResponse> listLocations(UUID branchId, LocationType type) {
+        requireVisibleBranch(branchId);
         List<Location> locations = type == null
                 ? locationRepository.findAllByBranchId(branchId)
                 : locationRepository.findAllByBranchIdAndType(branchId, type);
@@ -170,7 +186,7 @@ public class OrganizationService implements OrganizationDirectory {
         if (locationRepository.existsByCodeIgnoreCase(request.code())) {
             throw new ConflictException("Location code already exists: " + request.code());
         }
-        Branch branch = requireBranch(request.branchId());
+        Branch branch = requireVisibleBranch(request.branchId());
 
         Location location = new Location();
         location.setBranch(branch);
@@ -243,6 +259,19 @@ public class OrganizationService implements OrganizationDirectory {
 
     @Override
     @Transactional(readOnly = true)
+    public java.util.Optional<UUID> companyOfBranch(UUID branchId) {
+        return branchId == null ? java.util.Optional.empty() : branchRepository.findCompanyIdById(branchId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.Optional<String> companyName(UUID companyId) {
+        return companyId == null ? java.util.Optional.empty()
+                : companyRepository.findById(companyId).map(Company::getName);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public java.util.Map<UUID, String> branchNames(java.util.Collection<UUID> branchIds) {
         if (branchIds == null || branchIds.isEmpty()) {
             return java.util.Map.of();
@@ -260,6 +289,25 @@ public class OrganizationService implements OrganizationDirectory {
 
     private Branch requireBranch(UUID id) {
         return branchRepository.findById(id).orElseThrow(() -> NotFoundException.of("Branch", id));
+    }
+
+    /** A company the caller may see; another tenant's is reported as absent, not forbidden. */
+    private Company requireVisibleCompany(UUID id) {
+        Company company = requireCompany(id);
+        UUID scope = SecurityUtils.currentCompanyIdOrNull();
+        if (scope != null && !scope.equals(company.getId())) {
+            throw NotFoundException.of("Company", id);
+        }
+        return company;
+    }
+
+    private Branch requireVisibleBranch(UUID id) {
+        Branch branch = requireBranch(id);
+        UUID scope = SecurityUtils.currentCompanyIdOrNull();
+        if (scope != null && !scope.equals(branch.getCompany().getId())) {
+            throw NotFoundException.of("Branch", id);
+        }
+        return branch;
     }
 
     private Location requireLocationEntity(UUID id) {

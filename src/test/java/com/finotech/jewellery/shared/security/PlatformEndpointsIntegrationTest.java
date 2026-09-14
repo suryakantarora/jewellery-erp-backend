@@ -78,7 +78,7 @@ class PlatformEndpointsIntegrationTest extends IntegrationTestBase {
     void foreignBranchHeaderIsForbidden() throws Exception {
         UUID myBranch = UUID.randomUUID();
         AuthenticatedUser user = new AuthenticatedUser(UUID.randomUUID(), "branch-user",
-                Set.of("INVENTORY_VIEW"), Set.of(myBranch), false);
+                Set.of("INVENTORY_VIEW"), Set.of(myBranch), false, UUID.randomUUID());
         var token = new UsernamePasswordAuthenticationToken(user, null, user.authorities());
 
         mockMvc.perform(get("/api/v1/inventory/items")
@@ -108,7 +108,7 @@ class PlatformEndpointsIntegrationTest extends IntegrationTestBase {
 
         UUID branch = UUID.randomUUID();
         AuthenticatedUser user = new AuthenticatedUser(UUID.randomUUID(), "no-perms",
-                Set.of(), Set.of(branch), false);
+                Set.of(), Set.of(branch), false, UUID.randomUUID());
         var token = new UsernamePasswordAuthenticationToken(user, null, user.authorities());
         // The branch does not exist, so resolution succeeds and the lookup 404s:
         // proof the request got past security into the service.

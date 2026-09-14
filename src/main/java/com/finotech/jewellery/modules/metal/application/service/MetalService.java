@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import com.finotech.jewellery.modules.organization.application.CompanyScope;
 
 /**
  * Metal and purity master data.
@@ -28,10 +29,12 @@ public class MetalService {
     private final MetalRepository metalRepository;
     private final PurityRepository purityRepository;
     private final AuditService auditService;
+    private final CompanyScope companyScope;
 
     @Transactional(readOnly = true)
     public List<MetalResponse> listMetals() {
-        return metalRepository.findAllByOrderByNameAsc().stream().map(MetalResponse::from).toList();
+        return metalRepository.findAllInCompany(companyScope.currentOrNull()).stream()
+                .map(MetalResponse::from).toList();
     }
 
     @Transactional(readOnly = true)
@@ -41,10 +44,12 @@ public class MetalService {
 
     @Transactional
     public MetalResponse createMetal(MetalRequest request) {
-        if (metalRepository.existsByCodeIgnoreCase(request.code())) {
+        UUID companyId = companyScope.resolveForCreate(request.companyId());
+        if (metalRepository.existsByCompanyIdAndCodeIgnoreCase(companyId, request.code())) {
             throw new ConflictException("Metal code already exists: " + request.code());
         }
         Metal metal = new Metal();
+        metal.setCompanyId(companyId);
         applyMetal(metal, request);
         Metal saved = metalRepository.save(metal);
         auditService.record("METAL_CREATED", "Metal", saved.getId(), null, MetalResponse.from(saved));
@@ -63,6 +68,7 @@ public class MetalService {
 
     @Transactional(readOnly = true)
     public List<PurityResponse> listPurities(UUID metalId) {
+        requireMetal(metalId);
         return purityRepository.findAllByMetalIdOrderByDisplayOrderAscCodeAsc(metalId).stream()
                 .map(PurityResponse::from).toList();
     }
@@ -86,7 +92,7 @@ public class MetalService {
 
     @Transactional
     public PurityResponse updatePurity(UUID id, PurityRequest request) {
-        Purity purity = purityRepository.findById(id)
+        Purity purity = purityRepository.findByIdInCompany(id, companyScope.currentOrNull())
                 .orElseThrow(() -> NotFoundException.of("Purity", id));
         PurityResponse before = PurityResponse.from(purity);
         purity.setName(request.name().trim());
@@ -98,7 +104,8 @@ public class MetalService {
     }
 
     private Metal requireMetal(UUID id) {
-        return metalRepository.findById(id).orElseThrow(() -> NotFoundException.of("Metal", id));
+        return metalRepository.findByIdInCompany(id, companyScope.currentOrNull())
+                .orElseThrow(() -> NotFoundException.of("Metal", id));
     }
 
     private void applyMetal(Metal metal, MetalRequest request) {

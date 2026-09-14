@@ -10,9 +10,11 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import lombok.Getter;
 import org.hibernate.annotations.BatchSize;
 import lombok.NoArgsConstructor;
@@ -25,10 +27,19 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "supplier", schema = "procurement")
+@Table(name = "supplier", schema = "procurement",
+        uniqueConstraints = @UniqueConstraint(name = "uq_supplier_company_code",
+                columnNames = {"company_id", "code"}))
 public class Supplier extends BaseEntity {
 
-    @Column(name = "code", nullable = false, unique = true, length = 30)
+    /**
+     * The owning company (tenant). Held as an id, not an association: the
+     * organization module owns companies. Never changes after creation.
+     */
+    @Column(name = "company_id", nullable = false, updatable = false)
+    private UUID companyId;
+
+    @Column(name = "code", nullable = false, length = 30)
     private String code;
 
     @Column(name = "name", nullable = false, length = 200)

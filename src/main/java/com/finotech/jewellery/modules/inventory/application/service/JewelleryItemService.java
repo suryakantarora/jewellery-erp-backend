@@ -10,6 +10,7 @@ import com.finotech.jewellery.modules.inventory.api.request.CreateItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.ReserveItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.ResolveTagsRequest;
 import com.finotech.jewellery.modules.inventory.api.request.TagItemRequest;
+import com.finotech.jewellery.modules.inventory.api.request.UpdateImageRequest;
 import com.finotech.jewellery.modules.inventory.api.request.UpdateItemRequest;
 import com.finotech.jewellery.modules.inventory.api.response.ItemImageResponse;
 import com.finotech.jewellery.modules.inventory.api.response.ItemPassportResponse;
@@ -101,15 +102,24 @@ public class JewelleryItemService implements InventoryOperations {
         if (minPrice != null && maxPrice != null && minPrice.compareTo(maxPrice) > 0) {
             throw new ValidationException("minPrice must not exceed maxPrice");
         }
-        Page<JewelleryItem> page = itemRepository.search(search, productId, status, locationId,
-                branchId, metalId, purityId, binId, minPrice, maxPrice, pageable);
+        Page<JewelleryItem> page = itemRepository.search(SecurityUtils.currentCompanyIdOrNull(), search,
+                productId, status, locationId, branchId, metalId, purityId, binId, minPrice, maxPrice,
+                pageable);
         JewelleryItemResponse.DisplayNames names = displayNames.resolve(page.getContent());
         return PageResponse.of(page, item -> JewelleryItemResponse.from(item, names));
     }
 
     @Transactional(readOnly = true)
     public JewelleryItemResponse get(UUID id) {
-        return respond(requireItemEntity(id));
+        JewelleryItem item = requireItemEntity(id);
+        // Another company's item is reported as absent, never as forbidden.
+        UUID scope = SecurityUtils.currentCompanyIdOrNull();
+        if (scope != null && item.getCurrentBranchId() != null
+                && !organizationDirectory.companyOfBranch(item.getCurrentBranchId())
+                        .map(scope::equals).orElse(true)) {
+            throw NotFoundException.of("JewelleryItem", id);
+        }
+        return respond(item);
     }
 
     /** Resolves an item by any of its physical tags — used by POS scanners. */
@@ -431,6 +441,49 @@ public class JewelleryItemService implements InventoryOperations {
     }
 
     /**
+     * Promotes an image to primary, demotes it, or moves it in the gallery.
+     *
+     * <p>Promotion demotes the previous primary for the same reason
+     * {@link #addImage} does. Demoting the primary hands the role to the next
+     * picture in order rather than leaving the item with none.
+     */
+    @Transactional
+    public ItemImageResponse updateImage(UUID id, UUID imageId, UpdateImageRequest request) {
+        JewelleryItem item = requireItemEntity(id);
+        ItemImage image = imageRepository.findById(imageId)
+                .orElseThrow(() -> new NotFoundException("Image not found"));
+        if (!image.getItem().getId().equals(id)) {
+            throw new ValidationException("That image does not belong to this item");
+        }
+        if (request == null || (request.primaryImage() == null && request.displayOrder() == null)) {
+            throw new ValidationException("Nothing to change: send primaryImage or displayOrder");
+        }
+
+        if (request.displayOrder() != null) {
+            image.setDisplayOrder(request.displayOrder());
+        }
+        if (Boolean.TRUE.equals(request.primaryImage()) && !image.isPrimaryImage()) {
+            imageRepository.findAllByItemIdAndPrimaryImageTrue(id)
+                    .forEach(existing -> existing.setPrimaryImage(false));
+            imageRepository.flush();
+            image.setPrimaryImage(true);
+        } else if (Boolean.FALSE.equals(request.primaryImage()) && image.isPrimaryImage()) {
+            image.setPrimaryImage(false);
+            imageRepository.flush();
+            imageRepository.findAllByItemIdOrderByDisplayOrderAscCreatedAtAsc(id).stream()
+                    .filter(other -> !other.getId().equals(imageId))
+                    .findFirst()
+                    .ifPresent(next -> next.setPrimaryImage(true));
+        }
+
+        ItemImage saved = imageRepository.saveAndFlush(image);
+        auditService.record("ITEM_IMAGE_UPDATED", "JewelleryItem", id, null,
+                Map.of("imageId", imageId, "primaryImage", saved.isPrimaryImage()),
+                item.getCurrentBranchId());
+        return ItemImageResponse.from(saved);
+    }
+
+    /**
      * Unlinks an image.
      *
      * <p>The stored object is deliberately left in place. Deleting it here
@@ -616,7 +669,7 @@ public class JewelleryItemService implements InventoryOperations {
     @Transactional(readOnly = true)
     public List<ItemView> itemsAtLocation(UUID locationId) {
         // Only stock that should physically be there: items in transit have left.
-        return itemRepository.search(null, null, null, locationId, null, null, null, null,
+        return itemRepository.search(null, null, null, null, locationId, null, null, null, null,
                         null, null, org.springframework.data.domain.Pageable.unpaged())
                 .getContent().stream()
                 .filter(item -> item.getStatus().isInStock())

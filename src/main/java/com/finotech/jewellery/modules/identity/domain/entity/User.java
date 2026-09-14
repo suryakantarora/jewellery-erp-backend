@@ -58,6 +58,13 @@ public class User extends BaseEntity {
     @Column(name = "primary_branch_id")
     private UUID primaryBranchId;
 
+    /**
+     * The company the user works for. Null only for a super administrator,
+     * who is a platform user and acts across every company.
+     */
+    @Column(name = "company_id")
+    private UUID companyId;
+
     @Column(name = "must_change_password", nullable = false)
     private boolean mustChangePassword;
 

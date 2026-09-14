@@ -24,6 +24,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
+import com.finotech.jewellery.modules.organization.application.CompanyScope;
+import com.finotech.jewellery.modules.organization.application.OrganizationDirectory;
+import com.finotech.jewellery.shared.security.AuthenticatedUser;
+import com.finotech.jewellery.shared.security.SecurityUtils;
 
 /**
  * User administration: creation, profile and role/branch assignment.
@@ -37,16 +41,19 @@ public class UserService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
+    private final CompanyScope companyScope;
+    private final OrganizationDirectory organizationDirectory;
 
     @Transactional(readOnly = true)
     public PageResponse<UserResponse> search(String search, UUID branchId, Pageable pageable) {
-        return PageResponse.of(userRepository.search(search, branchId, pageable), UserResponse::from);
+        return PageResponse.of(userRepository.search(companyScope.currentOrNull(), search, branchId, pageable),
+                this::respond);
     }
 
     @Transactional(readOnly = true)
     public UserResponse get(UUID id) {
-        return userRepository.findWithAuthoritiesById(id)
-                .map(UserResponse::from)
+        return userRepository.findWithAuthoritiesByIdInCompany(id, companyScope.currentOrNull())
+                .map(this::respond)
                 .orElseThrow(() -> NotFoundException.of("User", id));
     }
 
@@ -59,7 +66,16 @@ public class UserService {
             throw new ConflictException("Email already in use: " + request.email());
         }
 
+        Set<Role> roles = resolveRoles(request.roleIds());
+        Set<UUID> branches = resolveBranches(request.branchIds(), request.primaryBranchId());
+        // A super administrator is a platform user and may have no company;
+        // everyone else belongs to exactly one, and only to branches of it.
+        boolean platformUser = roles.stream().anyMatch(Role::isSuperAdmin);
+        UUID companyId = resolveCompany(request.companyId(), branches, platformUser);
+        branches.forEach(branchId -> requireBranchInCompany(branchId, companyId));
+
         User user = new User();
+        user.setCompanyId(companyId);
         user.setUsername(request.username().trim());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         user.setFullName(request.fullName().trim());
@@ -70,17 +86,17 @@ public class UserService {
         user.setStatus(UserStatus.ACTIVE);
         user.setMustChangePassword(true);
         user.setPasswordChangedAt(Instant.now());
-        user.setRoles(resolveRoles(request.roleIds()));
-        user.setBranchIds(resolveBranches(request.branchIds(), request.primaryBranchId()));
+        user.setRoles(roles);
+        user.setBranchIds(branches);
 
         User saved = userRepository.save(user);
         auditService.record("USER_CREATED", "User", saved.getId(), null, UserResponse.from(saved));
-        return UserResponse.from(saved);
+        return respond(saved);
     }
 
     @Transactional
     public UserResponse update(UUID id, UpdateUserRequest request) {
-        User user = userRepository.findWithAuthoritiesById(id)
+        User user = userRepository.findWithAuthoritiesByIdInCompany(id, companyScope.currentOrNull())
                 .orElseThrow(() -> NotFoundException.of("User", id));
         UserResponse before = UserResponse.from(user);
 
@@ -101,16 +117,21 @@ public class UserService {
         }
         if (request.branchIds() != null) {
             user.setBranchIds(resolveBranches(request.branchIds(), request.primaryBranchId()));
+        } else if (request.primaryBranchId() != null) {
+            user.getBranchIds().add(request.primaryBranchId());
+        }
+        if (user.getCompanyId() != null) {
+            user.getBranchIds().forEach(branchId -> requireBranchInCompany(branchId, user.getCompanyId()));
         }
 
         UserResponse after = UserResponse.from(user);
         auditService.record("USER_UPDATED", "User", id, before, after);
-        return after;
+        return respond(user);
     }
 
     @Transactional
     public void resetPassword(UUID id, ResetPasswordRequest request) {
-        User user = userRepository.findById(id)
+        User user = userRepository.findByIdInCompany(id, companyScope.currentOrNull())
                 .orElseThrow(() -> NotFoundException.of("User", id));
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         user.setMustChangePassword(request.mustChangePassword());
@@ -126,7 +147,7 @@ public class UserService {
 
     @Transactional
     public void deactivate(UUID id) {
-        User user = userRepository.findById(id)
+        User user = userRepository.findByIdInCompany(id, companyScope.currentOrNull())
                 .orElseThrow(() -> NotFoundException.of("User", id));
         user.setStatus(UserStatus.INACTIVE);
         refreshTokenRepository.revokeAllForUser(id, Instant.now());
@@ -142,6 +163,36 @@ public class UserService {
             throw new ValidationException("One or more roles do not exist");
         }
         return new HashSet<>(roles);
+    }
+
+    /**
+     * The company a new user belongs to: the request's, else the creator's,
+     * else the company of the user's branches, else the platform's only
+     * company. A platform user (super administrator) may have none.
+     */
+    private UUID resolveCompany(UUID requested, Set<UUID> branches, boolean platformUser) {
+        if (requested == null && !branches.isEmpty()) {
+            UUID fromBranch = organizationDirectory.companyOfBranch(branches.iterator().next())
+                    .orElseThrow(() -> new ValidationException("Branch does not exist: "
+                            + branches.iterator().next()));
+            return companyScope.resolveForCreate(fromBranch);
+        }
+        if (requested == null && platformUser) {
+            AuthenticatedUser creator = SecurityUtils.requireCurrentUser();
+            return creator.companyId();
+        }
+        return companyScope.resolveForCreate(requested);
+    }
+
+    private void requireBranchInCompany(UUID branchId, UUID companyId) {
+        if (companyId != null) {
+            companyScope.requireBranchInCompany(branchId, companyId);
+        }
+    }
+
+    private UserResponse respond(User user) {
+        return UserResponse.from(user,
+                organizationDirectory.companyName(user.getCompanyId()).orElse(null));
     }
 
     private Set<UUID> resolveBranches(Set<UUID> branchIds, UUID primaryBranchId) {

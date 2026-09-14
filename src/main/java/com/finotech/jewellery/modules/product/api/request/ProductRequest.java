@@ -21,5 +21,6 @@ public record ProductRequest(@NotBlank @Size(max = 50) String sku,
                              @DecimalMin("0.0") BigDecimal defaultMakingChargeValue,
                              @DecimalMin("0.0") BigDecimal defaultWastagePercentage,
                              @Size(max = 30) String hsnCode,
-                             String description) {
+                             String description,
+                             UUID companyId) {
 }

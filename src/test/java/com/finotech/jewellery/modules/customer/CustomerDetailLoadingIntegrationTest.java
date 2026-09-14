@@ -10,6 +10,8 @@ import com.finotech.jewellery.modules.customer.api.request.CustomerRequest;
 import com.finotech.jewellery.modules.customer.api.request.PreferenceRequest;
 import com.finotech.jewellery.modules.customer.application.service.CustomerService;
 import com.finotech.jewellery.modules.customer.domain.enums.KycStatus;
+import com.finotech.jewellery.modules.organization.api.request.CompanyRequest;
+import com.finotech.jewellery.modules.organization.application.service.OrganizationService;
 import com.finotech.jewellery.modules.supplier.api.request.SupplierBankAccountRequest;
 import com.finotech.jewellery.modules.supplier.api.request.SupplierContactRequest;
 import com.finotech.jewellery.modules.supplier.api.request.SupplierRequest;
@@ -35,10 +37,16 @@ class CustomerDetailLoadingIntegrationTest extends IntegrationTestBase {
 
     @Autowired private CustomerService customerService;
     @Autowired private SupplierService supplierService;
+    @Autowired private OrganizationService organizationService;
+
+    private UUID companyId;
 
     @BeforeEach
     void authenticate() {
         TestSecurity.authenticateAsSuperAdmin();
+        String tag = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        companyId = organizationService.createCompany(new CompanyRequest(
+                "CO" + tag, "Test Co", null, null, null, "LAK", null, null, null, null, null)).id();
     }
 
     @AfterEach
@@ -51,7 +59,7 @@ class CustomerDetailLoadingIntegrationTest extends IntegrationTestBase {
     void customerWithEveryCollectionLoads() {
         UUID customerId = customerService.create(new CustomerRequest(
                 null, null, "Detail Test", null, phone(), null, null, null, null, null, null,
-                null, null)).id();
+                null, null, companyId)).id();
 
         customerService.addAddress(customerId, new CustomerAddressRequest(
                 "HOME", "123 Setthathirath Rd", null, "Vientiane", null, null, "Laos", true));
@@ -76,7 +84,7 @@ class CustomerDetailLoadingIntegrationTest extends IntegrationTestBase {
         String code = "SUP" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         UUID supplierId = supplierService.create(new SupplierRequest(
                 code, "Detail Supplier", null, null, null, null, null, null, null, null,
-                "LAK", 30, null, null)).id();
+                "LAK", 30, null, null, companyId)).id();
 
         supplierService.addContact(supplierId, new SupplierContactRequest(
                 "Somsak", "Director", "+8562000000000", null, true));
@@ -95,7 +103,7 @@ class CustomerDetailLoadingIntegrationTest extends IntegrationTestBase {
     void onlyOneDefaultAddress() {
         UUID customerId = customerService.create(new CustomerRequest(
                 null, null, "Address Test", null, phone(), null, null, null, null, null, null,
-                null, null)).id();
+                null, null, companyId)).id();
 
         customerService.addAddress(customerId, new CustomerAddressRequest(
                 "HOME", "First address", null, null, null, null, null, true));

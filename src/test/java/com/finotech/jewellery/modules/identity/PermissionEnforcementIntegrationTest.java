@@ -90,4 +90,28 @@ class PermissionEnforcementIntegrationTest extends IntegrationTestBase {
         mockMvc.perform(get("/v3/api-docs")).andExpect(status().isOk());
         mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
     }
+
+    @Test
+    @WithMockUser(authorities = "SALE_CREATE")
+    @DisplayName("a malformed enum inside a nested body element is a 400 naming the line, not a 500")
+    void malformedNestedEnumIsAValidationError() throws Exception {
+        String body = """
+                {
+                  "customerId": "00000000-0000-0000-0000-000000000001",
+                  "branchId": "00000000-0000-0000-0000-000000000002",
+                  "lines": [
+                    {"jewelleryItemId": "00000000-0000-0000-0000-000000000003", "discountType": "PERCENTAGE"},
+                    {"jewelleryItemId": "00000000-0000-0000-0000-000000000004", "discountType": "BOGUS"}
+                  ]
+                }
+                """;
+        mockMvc.perform(post("/api/v1/sales")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("lines[1].discountType"))
+                .andExpect(jsonPath("$.fieldErrors[0].message")
+                        .value(org.hamcrest.Matchers.containsString("PERCENTAGE")));
+    }
 }

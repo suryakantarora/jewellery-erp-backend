@@ -20,18 +20,27 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @EntityGraph(attributePaths = {"roles", "roles.permissions", "branchIds"})
     Optional<User> findWithAuthoritiesById(UUID id);
 
+    @EntityGraph(attributePaths = {"roles", "roles.permissions", "branchIds"})
+    @Query("select u from User u where u.id = :id and (:companyId is null or u.companyId = :companyId)")
+    Optional<User> findWithAuthoritiesByIdInCompany(@Param("id") UUID id, @Param("companyId") UUID companyId);
+
+    @Query("select u from User u where u.id = :id and (:companyId is null or u.companyId = :companyId)")
+    Optional<User> findByIdInCompany(@Param("id") UUID id, @Param("companyId") UUID companyId);
+
     boolean existsByUsernameIgnoreCase(String username);
 
     boolean existsByEmailIgnoreCase(String email);
 
     @Query("""
             select distinct u from User u
-            where (cast(:search as string) is null
+            where (:companyId is null or u.companyId = :companyId)
+              and (cast(:search as string) is null
                    or lower(u.username) like lower(concat('%', cast(:search as string), '%'))
                    or lower(u.fullName) like lower(concat('%', cast(:search as string), '%')))
               and (:branchId is null or :branchId member of u.branchIds)
             """)
-    Page<User> search(@Param("search") String search,
+    Page<User> search(@Param("companyId") UUID companyId,
+                      @Param("search") String search,
                       @Param("branchId") UUID branchId,
                       Pageable pageable);
 

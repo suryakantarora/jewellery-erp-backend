@@ -12,6 +12,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,10 +30,22 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "customer", schema = "customer")
+@Table(name = "customer", schema = "customer",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uq_customer_company_code",
+                        columnNames = {"company_id", "customer_code"}),
+                @UniqueConstraint(name = "uq_customer_company_phone",
+                        columnNames = {"company_id", "phone"})})
 public class Customer extends BaseEntity {
 
-    @Column(name = "customer_code", nullable = false, unique = true, length = 30)
+    /**
+     * The owning company (tenant). Held as an id, not an association: the
+     * organization module owns companies. Never changes after creation.
+     */
+    @Column(name = "company_id", nullable = false, updatable = false)
+    private UUID companyId;
+
+    @Column(name = "customer_code", nullable = false, length = 30)
     private String customerCode;
 
     @Enumerated(EnumType.STRING)

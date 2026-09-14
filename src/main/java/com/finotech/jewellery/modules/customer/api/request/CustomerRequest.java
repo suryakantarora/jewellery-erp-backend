@@ -20,5 +20,6 @@ public record CustomerRequest(@Size(max = 30) String customerCode,
                               @Size(max = 20) String gender,
                               @Size(max = 50) String taxNumber,
                               UUID registeredBranchId,
-                              @Size(max = 500) String notes) {
+                              @Size(max = 500) String notes,
+                              UUID companyId) {
 }

@@ -7,7 +7,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -118,10 +117,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleUnreadableBody(HttpMessageNotReadableException ex,
                                                          HttpServletRequest request) {
         if (ex.getCause() instanceof InvalidFormatException invalid) {
-            String field = invalid.getPath().stream()
-                    .map(JsonMappingException.Reference::getFieldName)
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.joining("."));
+            String field = jsonPath(invalid.getPath());
             String message = describeRejectedValue(invalid);
             return build(ErrorCode.VALIDATION_FAILED, "Request validation failed", request,
                     List.of(new ApiError.FieldError(field.isEmpty() ? "body" : field, message)));
@@ -181,6 +177,26 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleUnexpected(Exception ex, HttpServletRequest request) {
         log.error("Unhandled exception on {}", request.getRequestURI(), ex);
         return build(ErrorCode.INTERNAL_ERROR, "An unexpected error occurred", request, null);
+    }
+
+    /**
+     * Renders Jackson's reference chain as the client wrote it, indexes
+     * included: {@code lines[0].discountType}, not {@code lines.discountType},
+     * so a multi-line request says which line was wrong.
+     */
+    private static String jsonPath(List<JsonMappingException.Reference> path) {
+        StringBuilder out = new StringBuilder();
+        for (JsonMappingException.Reference ref : path) {
+            if (ref.getFieldName() != null) {
+                if (out.length() > 0) {
+                    out.append('.');
+                }
+                out.append(ref.getFieldName());
+            } else if (ref.getIndex() >= 0) {
+                out.append('[').append(ref.getIndex()).append(']');
+            }
+        }
+        return out.toString();
     }
 
     /** Names the accepted values for an enum, and stays generic otherwise. */

@@ -8,5 +8,6 @@ public record CategoryRequest(@NotBlank @Size(max = 40) String code,
                               @NotBlank @Size(max = 150) String name,
                               UUID parentId,
                               @Size(max = 255) String description,
-                              Integer displayOrder) {
+                              Integer displayOrder,
+                              UUID companyId) {
 }

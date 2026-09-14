@@ -34,6 +34,16 @@ public record CatalogueItemResponse(UUID id,
                                     BigDecimal totalCarat,
                                     String hallmarkNumber,
                                     String primaryImageKey,
+                                    /** The product this piece is an instance of. */
+                                    UUID productId,
+                                    /** The design, if the piece was made to one. */
+                                    UUID designId,
+                                    /**
+                                     * Catalogue artwork to show when the piece has no photograph of
+                                     * its own: the design's primary image, else the product's, else
+                                     * null.
+                                     */
+                                    String fallbackImageKey,
                                     /** From the pricing engine. Null if it could not be priced. */
                                     BigDecimal price,
                                     String currency) {

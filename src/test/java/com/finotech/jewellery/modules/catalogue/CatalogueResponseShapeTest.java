@@ -57,7 +57,8 @@ class CatalogueResponseShapeTest {
 
         assertThat(names)
                 .as("sanity: the response should describe a piece")
-                .contains("productName", "price", "currency");
+                .contains("productName", "price", "currency",
+                        "productId", "designId", "fallbackImageKey");
 
         for (String name : names) {
             String lower = name.toLowerCase(Locale.ROOT);

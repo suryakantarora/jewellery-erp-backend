@@ -9,6 +9,7 @@ import com.finotech.jewellery.modules.inventory.api.request.AssignBinRequest;
 import com.finotech.jewellery.modules.inventory.api.request.CreateItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.LinkImageRequest;
 import com.finotech.jewellery.modules.inventory.api.request.TagItemRequest;
+import com.finotech.jewellery.modules.inventory.api.request.UpdateImageRequest;
 import com.finotech.jewellery.modules.inventory.api.response.ItemImageResponse;
 import com.finotech.jewellery.modules.inventory.application.service.JewelleryItemService;
 import com.finotech.jewellery.modules.metal.api.request.MetalRequest;
@@ -70,7 +71,8 @@ class ItemBinAndImageIntegrationTest extends IntegrationTestBase {
                 branch.id(), null, "SHW" + unique, "Showroom", LocationType.SHOWROOM, false, null,
                 null)).id();
 
-        var metal = metalService.createMetal(new MetalRequest("MT" + unique, "Gold", "Au", "GRAM", null));
+        var metal = metalService.createMetal(new MetalRequest("MT" + unique, "Gold", "Au", "GRAM", null,
+                company.id()));
         var purity = metalService.createPurity(new PurityRequest(
                 metal.id(), "22K", "22 Karat", new BigDecimal("0.916700"), 1));
         var type = productMasterService.createProductType(new ProductTypeRequest(
@@ -78,7 +80,7 @@ class ItemBinAndImageIntegrationTest extends IntegrationTestBase {
         productId = productService.createProduct(new ProductRequest(
                 "SKU" + unique, "Test Ring", null, type.id(), null, null, null,
                 metal.id(), purity.id(), new BigDecimal("10.000"), "PER_GRAM",
-                new BigDecimal("45000"), null, null, null)).id();
+                new BigDecimal("45000"), null, null, null, company.id())).id();
     }
 
     @AfterEach
@@ -205,5 +207,36 @@ class ItemBinAndImageIntegrationTest extends IntegrationTestBase {
         itemService.tag(created.id(), new TagItemRequest(null, null, "BC-" + tag));
         itemService.approveForStock(created.id());
         return created.id();
+    }
+
+    @Test
+    @DisplayName("an existing image can be promoted to primary and reordered")
+    void existingImageCanBePromoted() {
+        UUID itemId = availableItem();
+        itemService.addImage(itemId,
+                new LinkImageRequest("items/a.jpg", "a.jpg", "image/jpeg", 1L, true, 1));
+        ItemImageResponse second = itemService.addImage(itemId,
+                new LinkImageRequest("items/b.jpg", "b.jpg", "image/jpeg", 1L, false, 2));
+
+        ItemImageResponse promoted = itemService.updateImage(itemId, second.id(),
+                new UpdateImageRequest(true, 0));
+
+        assertThat(promoted.primaryImage()).isTrue();
+        assertThat(promoted.displayOrder()).isZero();
+        assertThat(itemService.get(itemId).primaryImageKey()).isEqualTo("items/b.jpg");
+        assertThat(itemService.images(itemId))
+                .as("the previous primary was demoted, the gallery reordered")
+                .extracting(ItemImageResponse::storageKey, ItemImageResponse::primaryImage)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("items/b.jpg", true),
+                        org.assertj.core.groups.Tuple.tuple("items/a.jpg", false));
+
+        // Demoting the primary hands the role on rather than leaving none.
+        itemService.updateImage(itemId, second.id(), new UpdateImageRequest(false, null));
+        assertThat(itemService.get(itemId).primaryImageKey()).isEqualTo("items/a.jpg");
+
+        UUID otherItemId = availableItem();
+        assertThatThrownBy(() -> itemService.updateImage(otherItemId, second.id(),
+                new UpdateImageRequest(true, null)))
+                .isInstanceOf(ValidationException.class);
     }
 }

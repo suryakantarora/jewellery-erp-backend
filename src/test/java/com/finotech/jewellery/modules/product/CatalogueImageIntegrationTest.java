@@ -5,10 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.finotech.jewellery.IntegrationTestBase;
 import com.finotech.jewellery.TestSecurity;
+import com.finotech.jewellery.modules.organization.api.request.CompanyRequest;
+import com.finotech.jewellery.modules.organization.application.service.OrganizationService;
 import com.finotech.jewellery.modules.product.api.request.DesignRequest;
 import com.finotech.jewellery.modules.product.api.request.LinkImageRequest;
 import com.finotech.jewellery.modules.product.api.request.ProductRequest;
 import com.finotech.jewellery.modules.product.api.request.ProductTypeRequest;
+import com.finotech.jewellery.modules.product.api.request.UpdateImageRequest;
 import com.finotech.jewellery.modules.product.api.response.ImageResponse;
 import com.finotech.jewellery.modules.product.application.service.ProductMasterService;
 import com.finotech.jewellery.modules.product.application.service.ProductService;
@@ -31,7 +34,9 @@ class CatalogueImageIntegrationTest extends IntegrationTestBase {
 
     @Autowired private ProductService productService;
     @Autowired private ProductMasterService productMasterService;
+    @Autowired private OrganizationService organizationService;
 
+    private UUID companyId;
     private UUID designId;
     private UUID productId;
 
@@ -39,13 +44,15 @@ class CatalogueImageIntegrationTest extends IntegrationTestBase {
     void setUp() {
         TestSecurity.authenticateAsSuperAdmin();
         String unique = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        companyId = organizationService.createCompany(new CompanyRequest(
+                "CO" + unique, "Test Co", null, null, null, "LAK", null, null, null, null, null)).id();
         var type = productMasterService.createProductType(new ProductTypeRequest(
                 "PT" + unique, "Ring", null, true, null));
         designId = productService.createDesign(new DesignRequest(
-                "DSG" + unique, "Lotus Band", type.id(), null, null, null, null, null)).id();
+                "DSG" + unique, "Lotus Band", type.id(), null, null, null, null, null, companyId)).id();
         productId = productService.createProduct(new ProductRequest(
                 "SKU" + unique, "Lotus Ring", designId, type.id(), null, null, null,
-                null, null, new BigDecimal("10.000"), null, null, null, null, null)).id();
+                null, null, new BigDecimal("10.000"), null, null, null, null, null, companyId)).id();
     }
 
     @AfterEach
@@ -100,7 +107,7 @@ class CatalogueImageIntegrationTest extends IntegrationTestBase {
     void cannotRemoveAnotherDesignsImage() {
         String unique = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         UUID otherDesign = productService.createDesign(new DesignRequest(
-                "DSG" + unique, "Other", null, null, null, null, null, null)).id();
+                "DSG" + unique, "Other", null, null, null, null, null, null, companyId)).id();
         ImageResponse image = productService.addDesignImage(otherDesign,
                 new LinkImageRequest("designs/x.jpg", "x.jpg", "image/jpeg", 1L, true, 1));
 
@@ -122,5 +129,38 @@ class CatalogueImageIntegrationTest extends IntegrationTestBase {
 
         assertThat(productService.getProduct(productId).primaryImageKey()).isEqualTo("products/a.jpg");
         assertThat(productService.productImages(productId)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("an existing design or product image can be promoted to primary")
+    void existingImageCanBePromoted() {
+        productService.addDesignImage(designId,
+                new LinkImageRequest("designs/a.jpg", "a.jpg", "image/jpeg", 1L, true, 1));
+        ImageResponse designB = productService.addDesignImage(designId,
+                new LinkImageRequest("designs/b.jpg", "b.jpg", "image/jpeg", 1L, false, 2));
+
+        ImageResponse promoted = productService.updateDesignImage(designId, designB.id(),
+                new UpdateImageRequest(true, 0));
+        assertThat(promoted.primaryImage()).isTrue();
+        assertThat(promoted.displayOrder()).isZero();
+        assertThat(productService.getDesign(designId).primaryImageKey()).isEqualTo("designs/b.jpg");
+        assertThat(productService.designImages(designId)).filteredOn(ImageResponse::primaryImage)
+                .extracting(ImageResponse::storageKey).containsExactly("designs/b.jpg");
+
+        productService.addProductImage(productId,
+                new LinkImageRequest("products/a.jpg", "a.jpg", "image/jpeg", 1L, true, 1));
+        ImageResponse productB = productService.addProductImage(productId,
+                new LinkImageRequest("products/b.jpg", "b.jpg", "image/jpeg", 1L, false, 2));
+
+        assertThat(productService.updateProductImage(productId, productB.id(),
+                new UpdateImageRequest(true, null)).primaryImage()).isTrue();
+        assertThat(productService.getProduct(productId).primaryImageKey()).isEqualTo("products/b.jpg");
+
+        // Demoting hands the role on; an image of another design is refused.
+        productService.updateDesignImage(designId, designB.id(), new UpdateImageRequest(false, null));
+        assertThat(productService.getDesign(designId).primaryImageKey()).isEqualTo("designs/a.jpg");
+        assertThatThrownBy(() -> productService.updateProductImage(productId, designB.id(),
+                new UpdateImageRequest(true, null)))
+                .isInstanceOf(com.finotech.jewellery.shared.exception.NotFoundException.class);
     }
 }

@@ -21,6 +21,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import com.finotech.jewellery.modules.organization.application.CompanyScope;
 
 /**
  * Supplier master data with contacts, bank details and documents.
@@ -31,26 +32,28 @@ public class SupplierService implements SupplierDirectory {
 
     private final SupplierRepository supplierRepository;
     private final AuditService auditService;
+    private final CompanyScope companyScope;
 
     @Transactional(readOnly = true)
     public PageResponse<SupplierResponse> search(String search, SupplierStatus status,
                                                  Pageable pageable) {
-        return PageResponse.of(supplierRepository.search(search, status, pageable),
+        return PageResponse.of(supplierRepository.search(companyScope.currentOrNull(), search, status, pageable),
                 SupplierResponse::summary);
     }
 
     @Transactional(readOnly = true)
     public SupplierResponse get(UUID id) {
-        return SupplierResponse.detailed(supplierRepository.findWithDetailsById(id)
-                .orElseThrow(() -> NotFoundException.of("Supplier", id)));
+        return SupplierResponse.detailed(requireWithDetails(id));
     }
 
     @Transactional
     public SupplierResponse create(SupplierRequest request) {
-        if (supplierRepository.existsByCodeIgnoreCase(request.code())) {
+        UUID companyId = companyScope.resolveForCreate(request.companyId());
+        if (supplierRepository.existsByCompanyIdAndCodeIgnoreCase(companyId, request.code())) {
             throw new ConflictException("Supplier code already exists: " + request.code());
         }
         Supplier supplier = new Supplier();
+        supplier.setCompanyId(companyId);
         apply(supplier, request);
         Supplier saved = supplierRepository.save(supplier);
         auditService.record("SUPPLIER_CREATED", "Supplier", saved.getId(), null,
@@ -84,8 +87,7 @@ public class SupplierService implements SupplierDirectory {
 
     @Transactional
     public SupplierResponse addContact(UUID id, SupplierContactRequest request) {
-        Supplier supplier = supplierRepository.findWithDetailsById(id)
-                .orElseThrow(() -> NotFoundException.of("Supplier", id));
+        Supplier supplier = requireWithDetails(id);
         SupplierContact contact = new SupplierContact();
         contact.setName(request.name().trim());
         contact.setDesignation(request.designation());
@@ -101,8 +103,7 @@ public class SupplierService implements SupplierDirectory {
 
     @Transactional
     public SupplierResponse addBankAccount(UUID id, SupplierBankAccountRequest request) {
-        Supplier supplier = supplierRepository.findWithDetailsById(id)
-                .orElseThrow(() -> NotFoundException.of("Supplier", id));
+        Supplier supplier = requireWithDetails(id);
         SupplierBankAccount account = new SupplierBankAccount();
         account.setBankName(request.bankName().trim());
         account.setAccountName(request.accountName().trim());
@@ -145,8 +146,20 @@ public class SupplierService implements SupplierDirectory {
 
     // ---------- helpers ----------
 
+    /** Another company's supplier is reported as absent, never as forbidden. */
     private Supplier requireSupplierEntity(UUID id) {
-        return supplierRepository.findById(id).orElseThrow(() -> NotFoundException.of("Supplier", id));
+        return supplierRepository.findByIdInCompany(id, companyScope.currentOrNull())
+                .orElseThrow(() -> NotFoundException.of("Supplier", id));
+    }
+
+    private Supplier requireWithDetails(UUID id) {
+        Supplier supplier = supplierRepository.findWithDetailsById(id)
+                .orElseThrow(() -> NotFoundException.of("Supplier", id));
+        UUID scope = companyScope.currentOrNull();
+        if (scope != null && !scope.equals(supplier.getCompanyId())) {
+            throw NotFoundException.of("Supplier", id);
+        }
+        return supplier;
     }
 
     private SupplierView toView(Supplier s) {

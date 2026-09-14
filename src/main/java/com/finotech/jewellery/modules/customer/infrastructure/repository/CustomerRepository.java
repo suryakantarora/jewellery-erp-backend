@@ -13,11 +13,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface CustomerRepository extends JpaRepository<Customer, UUID> {
 
-    boolean existsByCustomerCodeIgnoreCase(String customerCode);
+    boolean existsByCompanyIdAndCustomerCodeIgnoreCase(UUID companyId, String customerCode);
 
-    boolean existsByPhone(String phone);
+    boolean existsByCompanyIdAndPhone(UUID companyId, String phone);
 
-    Optional<Customer> findByPhone(String phone);
+    @Query("select c from Customer c where c.phone = :phone and (:companyId is null or c.companyId = :companyId)")
+    Optional<Customer> findByPhoneInCompany(@Param("phone") String phone, @Param("companyId") UUID companyId);
+
+    @Query("select c from Customer c where c.id = :id and (:companyId is null or c.companyId = :companyId)")
+    Optional<Customer> findByIdInCompany(@Param("id") UUID id, @Param("companyId") UUID companyId);
 
     /**
      * Loads a customer whose collections are initialised lazily by the calling
@@ -29,6 +33,8 @@ public interface CustomerRepository extends JpaRepository<Customer, UUID> {
      */
     Optional<Customer> findWithDetailsById(UUID id);
 
+    Optional<Customer> findWithDetailsByIdAndCompanyId(UUID id, UUID companyId);
+
     /**
      * Active customers matching the demographic filters a CRM segment can use.
      * Birthday month is matched against the stored date of birth.
@@ -36,17 +42,20 @@ public interface CustomerRepository extends JpaRepository<Customer, UUID> {
     @Query("""
             select c from Customer c
             where c.status = com.finotech.jewellery.modules.customer.domain.enums.CustomerStatus.ACTIVE
+              and (:companyId is null or c.companyId = :companyId)
               and (:branchId is null or c.registeredBranchId = :branchId)
               and (:birthdayMonth is null
                    or (c.dateOfBirth is not null
                        and extract(month from c.dateOfBirth) = :birthdayMonth))
             """)
-    java.util.List<Customer> findSegmentCandidates(@Param("branchId") UUID branchId,
+    java.util.List<Customer> findSegmentCandidates(@Param("companyId") UUID companyId,
+                                                   @Param("branchId") UUID branchId,
                                                    @Param("birthdayMonth") Integer birthdayMonth);
 
     @Query("""
             select c from Customer c
-            where (cast(:search as string) is null
+            where (:companyId is null or c.companyId = :companyId)
+              and (cast(:search as string) is null
                    or lower(c.fullName) like lower(concat('%', cast(:search as string), '%'))
                    or lower(c.customerCode) like lower(concat('%', cast(:search as string), '%'))
                    or c.phone like concat('%', cast(:search as string), '%'))
@@ -54,7 +63,8 @@ public interface CustomerRepository extends JpaRepository<Customer, UUID> {
               and (:kycStatus is null or c.kycStatus = :kycStatus)
               and (:branchId is null or c.registeredBranchId = :branchId)
             """)
-    Page<Customer> search(@Param("search") String search,
+    Page<Customer> search(@Param("companyId") UUID companyId,
+                          @Param("search") String search,
                           @Param("status") CustomerStatus status,
                           @Param("kycStatus") KycStatus kycStatus,
                           @Param("branchId") UUID branchId,

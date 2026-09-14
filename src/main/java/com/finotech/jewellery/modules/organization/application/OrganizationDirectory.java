@@ -15,6 +15,12 @@ public interface OrganizationDirectory {
 
     boolean branchExists(UUID branchId);
 
+    /** The company that owns a branch; empty when the branch is unknown. */
+    java.util.Optional<UUID> companyOfBranch(UUID branchId);
+
+    /** Display name of a company; empty when unknown. */
+    java.util.Optional<String> companyName(UUID companyId);
+
     /** Display names for a set of branches, for list rows; unknown ids are omitted. */
     java.util.Map<UUID, String> branchNames(java.util.Collection<UUID> branchIds);
 

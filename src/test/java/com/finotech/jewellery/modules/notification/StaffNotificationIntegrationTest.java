@@ -27,7 +27,6 @@ import com.finotech.jewellery.modules.notification.domain.enums.RecipientType;
 import com.finotech.jewellery.modules.notification.infrastructure.repository.NotificationDeviceRepository;
 import com.finotech.jewellery.modules.notification.infrastructure.repository.NotificationRepository;
 import com.finotech.jewellery.modules.organization.api.request.BranchRequest;
-import com.finotech.jewellery.modules.organization.api.request.CompanyRequest;
 import com.finotech.jewellery.modules.organization.api.request.LocationRequest;
 import com.finotech.jewellery.modules.organization.application.service.OrganizationService;
 import com.finotech.jewellery.modules.organization.domain.enums.LocationType;
@@ -92,9 +91,9 @@ class StaffNotificationIntegrationTest extends IntegrationTestBase {
         vaultId = organizationService.createLocation(new LocationRequest(world.branchId(), null,
                 "VLT" + tag, "Vault", LocationType.VAULT, true, null, null)).id();
 
-        var company = organizationService.createCompany(new CompanyRequest("OC" + tag,
-                "Other Co", null, null, null, "LAK", null, null, null, null, null));
-        otherBranchId = organizationService.createBranch(new BranchRequest(company.id(),
+        // Another branch of the same company: staff may be granted both, which
+        // they could not be across companies.
+        otherBranchId = organizationService.createBranch(new BranchRequest(world.companyId(),
                 "OB" + tag, "Other Branch", false, null, null, null, null, null, null)).id();
 
         approverRoleId = role("APR", "INVENTORY_TRANSFER_APPROVE");
@@ -263,13 +262,13 @@ class StaffNotificationIntegrationTest extends IntegrationTestBase {
     private UUID user(String name, UUID roleId, UUID branchId) {
         String username = name.contains(tag) ? name : name + tag;
         return userService.create(new CreateUserRequest(username, "Password123!x", name,
-                null, null, null, branchId, Set.of(roleId), Set.of(branchId))).id();
+                null, null, null, branchId, Set.of(roleId), Set.of(branchId), null)).id();
     }
 
     /** A principal with a chosen username, so audit columns name a real user. */
     private static void authenticateAs(UUID userId, String username) {
         AuthenticatedUser user = new AuthenticatedUser(userId, username,
-                Set.of("INVENTORY_TRANSFER", "INVENTORY_TRANSFER_APPROVE"), Set.of(), true);
+                Set.of("INVENTORY_TRANSFER", "INVENTORY_TRANSFER_APPROVE"), Set.of(), true, null);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(user, null, user.authorities()));
     }

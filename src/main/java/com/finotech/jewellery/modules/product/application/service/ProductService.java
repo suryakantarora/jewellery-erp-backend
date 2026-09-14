@@ -2,6 +2,7 @@ package com.finotech.jewellery.modules.product.application.service;
 
 import com.finotech.jewellery.modules.product.api.request.DesignRequest;
 import com.finotech.jewellery.modules.product.api.request.LinkImageRequest;
+import com.finotech.jewellery.modules.product.api.request.UpdateImageRequest;
 import com.finotech.jewellery.modules.product.api.request.ProductRequest;
 import com.finotech.jewellery.modules.product.api.response.DesignResponse;
 import com.finotech.jewellery.modules.product.api.response.ImageResponse;
@@ -34,6 +35,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.finotech.jewellery.modules.organization.application.CompanyScope;
 
 /**
  * Designs and the reusable product master. Creating a product never creates
@@ -52,13 +54,15 @@ public class ProductService implements ProductCatalog {
     private final DesignImageRepository designImageRepository;
     private final ProductImageRepository productImageRepository;
     private final AuditService auditService;
+    private final CompanyScope companyScope;
 
     // ---------- design ----------
 
     @Transactional(readOnly = true)
     public PageResponse<DesignResponse> searchDesigns(String search, UUID collectionId,
                                                       UUID productTypeId, Pageable pageable) {
-        return PageResponse.of(designRepository.search(search, collectionId, productTypeId, pageable),
+        return PageResponse.of(designRepository.search(companyScope.currentOrNull(), search,
+                        collectionId, productTypeId, pageable),
                 DesignResponse::from);
     }
 
@@ -69,10 +73,12 @@ public class ProductService implements ProductCatalog {
 
     @Transactional
     public DesignResponse createDesign(DesignRequest request) {
-        if (designRepository.existsByDesignCodeIgnoreCase(request.designCode())) {
+        UUID companyId = companyScope.resolveForCreate(request.companyId());
+        if (designRepository.existsByCompanyIdAndDesignCodeIgnoreCase(companyId, request.designCode())) {
             throw new ConflictException("Design code already exists: " + request.designCode());
         }
         JewelleryDesign design = new JewelleryDesign();
+        design.setCompanyId(companyId);
         applyDesign(design, request);
         JewelleryDesign saved = designRepository.save(design);
         auditService.record("DESIGN_CREATED", "JewelleryDesign", saved.getId(), null,
@@ -97,7 +103,8 @@ public class ProductService implements ProductCatalog {
                                                         UUID productTypeId, UUID brandId,
                                                         UUID collectionId, Pageable pageable) {
         return PageResponse.of(
-                productRepository.search(search, categoryId, productTypeId, brandId, collectionId, pageable),
+                productRepository.search(companyScope.currentOrNull(), search, categoryId, productTypeId,
+                        brandId, collectionId, pageable),
                 ProductResponse::from);
     }
 
@@ -108,10 +115,12 @@ public class ProductService implements ProductCatalog {
 
     @Transactional
     public ProductResponse createProduct(ProductRequest request) {
-        if (productRepository.existsBySkuIgnoreCase(request.sku())) {
+        UUID companyId = companyScope.resolveForCreate(request.companyId());
+        if (productRepository.existsByCompanyIdAndSkuIgnoreCase(companyId, request.sku())) {
             throw new ConflictException("SKU already exists: " + request.sku());
         }
         Product product = new Product();
+        product.setCompanyId(companyId);
         applyProduct(product, request);
         Product saved = productRepository.save(product);
         auditService.record("PRODUCT_CREATED", "Product", saved.getId(), null,
@@ -124,7 +133,7 @@ public class ProductService implements ProductCatalog {
         Product product = requireProductEntity(id);
         ProductResponse before = ProductResponse.from(product);
         if (!product.getSku().equalsIgnoreCase(request.sku())
-                && productRepository.existsBySkuIgnoreCase(request.sku())) {
+                && productRepository.existsByCompanyIdAndSkuIgnoreCase(product.getCompanyId(), request.sku())) {
             throw new ConflictException("SKU already exists: " + request.sku());
         }
         applyProduct(product, request);
@@ -180,6 +189,41 @@ public class ProductService implements ProductCatalog {
         auditService.record("DESIGN_IMAGE_ADDED", "JewelleryDesign", designId, null,
                 Map.of("storageKey", saved.getStorageKey()));
         return ImageResponse.from(saved);
+    }
+
+    /** Promotes, demotes or reorders a design image; same rules as item images. */
+    @Transactional
+    public ImageResponse updateDesignImage(UUID designId, UUID imageId, UpdateImageRequest request) {
+        requireDesign(designId);
+        DesignImage image = designImageRepository.findById(imageId)
+                .orElseThrow(() -> new NotFoundException("Image not found"));
+        if (!image.getDesign().getId().equals(designId)) {
+            throw new ValidationException("That image does not belong to this design");
+        }
+        requireSomethingToChange(request);
+
+        if (request.displayOrder() != null) {
+            image.setDisplayOrder(request.displayOrder());
+        }
+        if (Boolean.TRUE.equals(request.primaryImage()) && !image.isPrimaryImage()) {
+            designImageRepository.findAllByDesignIdAndPrimaryImageTrue(designId)
+                    .forEach(existing -> existing.setPrimaryImage(false));
+            designImageRepository.flush();
+            image.setPrimaryImage(true);
+        } else if (Boolean.FALSE.equals(request.primaryImage()) && image.isPrimaryImage()) {
+            image.setPrimaryImage(false);
+            designImageRepository.flush();
+            designImageRepository.findAllByDesignIdOrderByDisplayOrderAscCreatedAtAsc(designId).stream()
+                    .filter(other -> !other.getId().equals(imageId))
+                    .findFirst().ifPresent(next -> next.setPrimaryImage(true));
+        }
+        return ImageResponse.from(designImageRepository.saveAndFlush(image));
+    }
+
+    private static void requireSomethingToChange(UpdateImageRequest request) {
+        if (request == null || (request.primaryImage() == null && request.displayOrder() == null)) {
+            throw new ValidationException("Nothing to change: send primaryImage or displayOrder");
+        }
     }
 
     /** Unlinks an image; the stored object is kept, as other references may share it. */
@@ -240,6 +284,35 @@ public class ProductService implements ProductCatalog {
         return ImageResponse.from(saved);
     }
 
+    /** Promotes, demotes or reorders a product image; same rules as item images. */
+    @Transactional
+    public ImageResponse updateProductImage(UUID productId, UUID imageId, UpdateImageRequest request) {
+        requireProductEntity(productId);
+        ProductImage image = productImageRepository.findById(imageId)
+                .orElseThrow(() -> new NotFoundException("Image not found"));
+        if (!image.getProduct().getId().equals(productId)) {
+            throw new ValidationException("That image does not belong to this product");
+        }
+        requireSomethingToChange(request);
+
+        if (request.displayOrder() != null) {
+            image.setDisplayOrder(request.displayOrder());
+        }
+        if (Boolean.TRUE.equals(request.primaryImage()) && !image.isPrimaryImage()) {
+            productImageRepository.findAllByProductIdAndPrimaryImageTrue(productId)
+                    .forEach(existing -> existing.setPrimaryImage(false));
+            productImageRepository.flush();
+            image.setPrimaryImage(true);
+        } else if (Boolean.FALSE.equals(request.primaryImage()) && image.isPrimaryImage()) {
+            image.setPrimaryImage(false);
+            productImageRepository.flush();
+            productImageRepository.findAllByProductIdOrderByDisplayOrderAscCreatedAtAsc(productId).stream()
+                    .filter(other -> !other.getId().equals(imageId))
+                    .findFirst().ifPresent(next -> next.setPrimaryImage(true));
+        }
+        return ImageResponse.from(productImageRepository.saveAndFlush(image));
+    }
+
     @Transactional
     public void removeProductImage(UUID productId, UUID imageId) {
         Product product = requireProductEntity(productId);
@@ -296,12 +369,14 @@ public class ProductService implements ProductCatalog {
 
     // ---------- helpers ----------
 
+    /** Another company's product is reported as absent, never as forbidden. */
     private Product requireProductEntity(UUID id) {
-        return productRepository.findById(id).orElseThrow(() -> NotFoundException.of("Product", id));
+        return productRepository.findByIdInCompany(id, companyScope.currentOrNull())
+                .orElseThrow(() -> NotFoundException.of("Product", id));
     }
 
     private JewelleryDesign requireDesign(UUID id) {
-        return designRepository.findById(id)
+        return designRepository.findByIdInCompany(id, companyScope.currentOrNull())
                 .orElseThrow(() -> NotFoundException.of("JewelleryDesign", id));
     }
 
@@ -338,7 +413,7 @@ public class ProductService implements ProductCatalog {
                 .orElseThrow(() -> NotFoundException.of("ProductType", request.productTypeId())));
         product.setDesign(request.designId() == null ? null : requireDesign(request.designId()));
         product.setCategory(request.categoryId() == null ? null
-                : categoryRepository.findById(request.categoryId())
+                : categoryRepository.findByIdInCompany(request.categoryId(), product.getCompanyId())
                         .orElseThrow(() -> NotFoundException.of("ProductCategory", request.categoryId())));
         product.setBrand(request.brandId() == null ? null
                 : brandRepository.findById(request.brandId())

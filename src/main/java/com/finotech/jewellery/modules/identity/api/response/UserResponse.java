@@ -18,9 +18,16 @@ public record UserResponse(UUID id,
                            Set<UUID> branchIds,
                            List<String> roles,
                            Set<String> permissions,
-                           Instant lastLoginAt) {
+                           Instant lastLoginAt,
+                           UUID companyId,
+                           String companyName) {
 
     public static UserResponse from(User user) {
+        return from(user, null);
+    }
+
+    /** With the company's display name resolved by the caller. */
+    public static UserResponse from(User user, String companyName) {
         return new UserResponse(
                 user.getId(),
                 user.getUsername(),
@@ -33,6 +40,8 @@ public record UserResponse(UUID id,
                 Set.copyOf(user.getBranchIds()),
                 user.getRoles().stream().map(r -> r.getCode()).toList(),
                 user.permissionCodes(),
-                user.getLastLoginAt());
+                user.getLastLoginAt(),
+                user.getCompanyId(),
+                companyName);
     }
 }

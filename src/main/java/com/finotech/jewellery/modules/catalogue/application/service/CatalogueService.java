@@ -9,6 +9,7 @@ import com.finotech.jewellery.shared.security.AuthenticatedUser;
 import com.finotech.jewellery.shared.security.SecurityUtils;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,16 +40,24 @@ public class CatalogueService {
                                                       UUID purityId, String search,
                                                       Pageable pageable) {
         UUID scoped = resolveBranch(branchId);
+        UUID companyId = SecurityUtils.currentCompanyIdOrNull();
 
         List<CatalogueQueryRepository.Row> rows = catalogue.search(
-                scoped, categoryId, metalId, purityId, search,
+                companyId, scoped, categoryId, metalId, purityId, search,
                 pageable.getPageSize(), (int) pageable.getOffset());
 
+        // Artwork fallback resolved once per page, one query per type, the
+        // same way primaryImageKey and display names are batched elsewhere.
+        Map<UUID, String> designArt = catalogue.primaryDesignImageKeys(
+                rows.stream().map(CatalogueQueryRepository.Row::designId).toList());
+        Map<UUID, String> productArt = catalogue.primaryProductImageKeys(
+                rows.stream().map(CatalogueQueryRepository.Row::productId).toList());
+
         List<CatalogueItemResponse> content = rows.stream()
-                .map(row -> toResponse(row, scoped))
+                .map(row -> toResponse(row, scoped, fallbackArtwork(row, designArt, productArt)))
                 .toList();
 
-        long total = catalogue.count(scoped, categoryId, metalId, purityId, search);
+        long total = catalogue.count(companyId, scoped, categoryId, metalId, purityId, search);
         return PageResponse.of(new PageImpl<>(content, pageable, total));
     }
 
@@ -77,7 +86,15 @@ public class CatalogueService {
         return requested;
     }
 
-    private CatalogueItemResponse toResponse(CatalogueQueryRepository.Row row, UUID branchId) {
+    private static String fallbackArtwork(CatalogueQueryRepository.Row row,
+                                          Map<UUID, String> designArt,
+                                          Map<UUID, String> productArt) {
+        String design = row.designId() == null ? null : designArt.get(row.designId());
+        return design != null ? design : productArt.get(row.productId());
+    }
+
+    private CatalogueItemResponse toResponse(CatalogueQueryRepository.Row row, UUID branchId,
+                                             String fallbackImageKey) {
         BigDecimal price = null;
         String currency = row.currency();
         try {
@@ -99,6 +116,7 @@ public class CatalogueService {
         return new CatalogueItemResponse(row.id(), row.itemCode(), row.productName(),
                 row.categoryName(), row.typeName(), row.metalName(), row.purityCode(),
                 row.purityName(), row.grossWeight(), row.netMetalWeight(), row.stoneCount(),
-                row.totalCarat(), row.hallmarkNumber(), row.primaryImageKey(), price, currency);
+                row.totalCarat(), row.hallmarkNumber(), row.primaryImageKey(),
+                row.productId(), row.designId(), fallbackImageKey, price, currency);
     }
 }

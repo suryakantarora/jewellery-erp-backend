@@ -13,10 +13,12 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import org.hibernate.annotations.BatchSize;
+import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -29,10 +31,19 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "jewellery_design", schema = "product")
+@Table(name = "jewellery_design", schema = "product",
+        uniqueConstraints = @UniqueConstraint(name = "uq_jewellery_design_company_code",
+                columnNames = {"company_id", "design_code"}))
 public class JewelleryDesign extends BaseEntity {
 
-    @Column(name = "design_code", nullable = false, unique = true, length = 50)
+    /**
+     * The owning company (tenant). Held as an id, not an association: the
+     * organization module owns companies. Never changes after creation.
+     */
+    @Column(name = "company_id", nullable = false, updatable = false)
+    private UUID companyId;
+
+    @Column(name = "design_code", nullable = false, length = 50)
     private String designCode;
 
     @Column(name = "name", nullable = false, length = 150)

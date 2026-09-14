@@ -13,6 +13,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,10 +34,19 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "product", schema = "product")
+@Table(name = "product", schema = "product",
+        uniqueConstraints = @UniqueConstraint(name = "uq_product_company_sku",
+                columnNames = {"company_id", "sku"}))
 public class Product extends BaseEntity {
 
-    @Column(name = "sku", nullable = false, unique = true, length = 50)
+    /**
+     * The owning company (tenant). Held as an id, not an association: the
+     * organization module owns companies. Never changes after creation.
+     */
+    @Column(name = "company_id", nullable = false, updatable = false)
+    private UUID companyId;
+
+    @Column(name = "sku", nullable = false, length = 50)
     private String sku;
 
     @Column(name = "name", nullable = false, length = 200)

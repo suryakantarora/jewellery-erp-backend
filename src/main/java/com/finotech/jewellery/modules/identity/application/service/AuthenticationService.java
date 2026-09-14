@@ -29,6 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.finotech.jewellery.modules.organization.application.OrganizationDirectory;
 
 /**
  * Login, token refresh, logout and password change.
@@ -50,6 +51,7 @@ public class AuthenticationService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuditService auditService;
+    private final OrganizationDirectory organizationDirectory;
 
     @Transactional
     public AuthResponse login(LoginRequest request, String userAgent, String ipAddress) {
@@ -79,7 +81,7 @@ public class AuthenticationService {
 
         return new AuthResponse(accessToken, refreshToken, "Bearer",
                 Instant.now().plus(jwtService.accessTokenTtl()),
-                user.isMustChangePassword(), UserResponse.from(user));
+                user.isMustChangePassword(), profile(user));
     }
 
     @Transactional
@@ -106,7 +108,7 @@ public class AuthenticationService {
 
         return new AuthResponse(accessToken, rotated, "Bearer",
                 Instant.now().plus(jwtService.accessTokenTtl()),
-                user.isMustChangePassword(), UserResponse.from(user));
+                user.isMustChangePassword(), profile(user));
     }
 
     @Transactional
@@ -148,8 +150,13 @@ public class AuthenticationService {
     public UserResponse currentUserProfile() {
         UUID userId = SecurityUtils.requireCurrentUser().userId();
         return userRepository.findWithAuthoritiesById(userId)
-                .map(UserResponse::from)
+                .map(this::profile)
                 .orElseThrow(() -> NotFoundException.of("User", userId));
+    }
+
+    private UserResponse profile(User user) {
+        return UserResponse.from(user,
+                organizationDirectory.companyName(user.getCompanyId()).orElse(null));
     }
 
     private void registerFailedAttempt(User user) {
@@ -165,7 +172,7 @@ public class AuthenticationService {
 
     private AuthenticatedUser toPrincipal(User user) {
         return new AuthenticatedUser(user.getId(), user.getUsername(), user.permissionCodes(),
-                new HashSet<>(user.getBranchIds()), user.isSuperAdmin());
+                new HashSet<>(user.getBranchIds()), user.isSuperAdmin(), user.getCompanyId());
     }
 
     private String issueRefreshToken(UUID userId, String userAgent, String ipAddress) {

@@ -49,8 +49,8 @@ public class CommerceFixture {
     private final CustomerService customerService;
     private final JewelleryItemService itemService;
 
-    public record World(UUID branchId, UUID locationId, UUID metalId, UUID purityId,
-                        UUID productTypeId, UUID productId, UUID customerId,
+    public record World(UUID companyId, UUID branchId, UUID locationId, UUID metalId,
+                        UUID purityId, UUID productTypeId, UUID productId, UUID customerId,
                         BigDecimal ratePerGram) {
     }
 
@@ -67,10 +67,13 @@ public class CommerceFixture {
                 "CO" + tag, "Test Co", null, null, null, "LAK", null, null, null, null, null));
         var branch = organizationService.createBranch(new BranchRequest(
                 company.id(), "BR" + tag, "Test Branch", true, null, null, null, null, null, null));
+        // Ordinary test users belong to this company from here on.
+        TestSecurity.defaultCompany(company.id());
         var location = organizationService.createLocation(new LocationRequest(
                 branch.id(), null, "LOC" + tag, "Showroom", LocationType.SHOWROOM, false, null, null));
 
-        var metal = metalService.createMetal(new MetalRequest("MT" + tag, "Gold", "Au", "GRAM", null));
+        var metal = metalService.createMetal(new MetalRequest("MT" + tag, "Gold", "Au", "GRAM", null,
+                company.id()));
         var purity = metalService.createPurity(new PurityRequest(
                 metal.id(), "22K", "22 Karat", new BigDecimal("0.916700"), 1));
         metalRateService.publish(new PublishRateRequest(metal.id(), purity.id(), RateType.SELLING,
@@ -80,7 +83,8 @@ public class CommerceFixture {
                 "PT" + tag, "Ring", null, true, null));
         var product = productService.createProduct(new ProductRequest(
                 "SKU" + tag, "Test Ring", null, type.id(), null, null, null,
-                metal.id(), purity.id(), new BigDecimal("10.000"), null, null, null, null, null));
+                metal.id(), purity.id(), new BigDecimal("10.000"), null, null, null, null, null,
+                company.id()));
 
         pricingConfigService.createMakingChargeRule(new MakingChargeRuleRequest(
                 "MC" + tag, "Making rule", product.id(), null, null, null, null,
@@ -99,9 +103,9 @@ public class CommerceFixture {
 
         var customer = customerService.create(new CustomerRequest(
                 null, null, "Test Customer", null, "+8562" + System.nanoTime() % 100000000L,
-                null, null, null, null, null, null, branch.id(), null));
+                null, null, null, null, null, null, branch.id(), null, company.id()));
 
-        return new World(branch.id(), location.id(), metal.id(), purity.id(), type.id(),
+        return new World(company.id(), branch.id(), location.id(), metal.id(), purity.id(), type.id(),
                 product.id(), customer.id(), ratePerGram);
     }
 

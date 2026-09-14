@@ -15,6 +15,13 @@ public interface BranchRepository extends JpaRepository<Branch, UUID> {
 
     List<Branch> findAllByCompanyId(UUID companyId);
 
+    @Query("select b.company.id from Branch b where b.id = :id")
+    java.util.Optional<UUID> findCompanyIdById(@Param("id") UUID id);
+
+    @Query("select b from Branch b where b.id in :ids and (:companyId is null or b.company.id = :companyId)")
+    List<Branch> findAllByIdInCompany(@Param("ids") java.util.Collection<UUID> ids,
+                                      @Param("companyId") UUID companyId);
+
     @Query("""
             select b from Branch b
             where (:companyId is null or b.company.id = :companyId)

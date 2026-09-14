@@ -12,7 +12,10 @@ import org.springframework.data.repository.query.Param;
 
 public interface SupplierRepository extends JpaRepository<Supplier, UUID> {
 
-    boolean existsByCodeIgnoreCase(String code);
+    boolean existsByCompanyIdAndCodeIgnoreCase(UUID companyId, String code);
+
+    @Query("select s from Supplier s where s.id = :id and (:companyId is null or s.companyId = :companyId)")
+    Optional<Supplier> findByIdInCompany(@Param("id") UUID id, @Param("companyId") UUID companyId);
 
     /**
      * Loads a supplier whose collections are initialised lazily by the calling
@@ -23,12 +26,14 @@ public interface SupplierRepository extends JpaRepository<Supplier, UUID> {
 
     @Query("""
             select s from Supplier s
-            where (cast(:search as string) is null
+            where (:companyId is null or s.companyId = :companyId)
+              and (cast(:search as string) is null
                    or lower(s.name) like lower(concat('%', cast(:search as string), '%'))
                    or lower(s.code) like lower(concat('%', cast(:search as string), '%')))
               and (:status is null or s.status = :status)
             """)
-    Page<Supplier> search(@Param("search") String search,
+    Page<Supplier> search(@Param("companyId") UUID companyId,
+                          @Param("search") String search,
                           @Param("status") SupplierStatus status,
                           Pageable pageable);
 }

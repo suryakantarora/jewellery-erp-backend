@@ -28,6 +28,8 @@ public class JwtService {
     private static final String CLAIM_BRANCHES = "branches";
     private static final String CLAIM_SUPER_ADMIN = "sa";
     private static final String CLAIM_USERNAME = "username";
+    /** The tenant. Absent on tokens issued before company scoping existed. */
+    private static final String CLAIM_COMPANY = "co";
 
     private final SecurityProperties properties;
     private final SecretKey key;
@@ -59,6 +61,7 @@ public class JwtService {
                 .claim(CLAIM_PERMISSIONS, List.copyOf(user.permissions()))
                 .claim(CLAIM_BRANCHES, user.branchIds().stream().map(UUID::toString).toList())
                 .claim(CLAIM_SUPER_ADMIN, user.superAdmin())
+                .claim(CLAIM_COMPANY, user.companyId() == null ? null : user.companyId().toString())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessTokenTtl())))
                 .signWith(key)
@@ -83,11 +86,13 @@ public class JwtService {
         if (rawBranches != null) {
             rawBranches.forEach(b -> branches.add(UUID.fromString(String.valueOf(b))));
         }
+        String company = claims.get(CLAIM_COMPANY, String.class);
         return new AuthenticatedUser(
                 UUID.fromString(claims.getSubject()),
                 claims.get(CLAIM_USERNAME, String.class),
                 permissions,
                 branches,
-                Boolean.TRUE.equals(claims.get(CLAIM_SUPER_ADMIN, Boolean.class)));
+                Boolean.TRUE.equals(claims.get(CLAIM_SUPER_ADMIN, Boolean.class)),
+                StringUtils.hasText(company) ? UUID.fromString(company) : null);
     }
 }

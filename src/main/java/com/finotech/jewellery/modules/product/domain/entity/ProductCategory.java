@@ -10,6 +10,8 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -21,10 +23,19 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "product_category", schema = "product")
+@Table(name = "product_category", schema = "product",
+        uniqueConstraints = @UniqueConstraint(name = "uq_product_category_company_code",
+                columnNames = {"company_id", "code"}))
 public class ProductCategory extends BaseEntity {
 
-    @Column(name = "code", nullable = false, unique = true, length = 40)
+    /**
+     * The owning company (tenant). Held as an id, not an association: the
+     * organization module owns companies. Never changes after creation.
+     */
+    @Column(name = "company_id", nullable = false, updatable = false)
+    private UUID companyId;
+
+    @Column(name = "code", nullable = false, length = 40)
     private String code;
 
     @Column(name = "name", nullable = false, length = 150)

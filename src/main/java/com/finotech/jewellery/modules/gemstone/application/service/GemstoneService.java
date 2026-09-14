@@ -27,6 +27,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import com.finotech.jewellery.modules.organization.application.CompanyScope;
 
 /**
  * Gemstone master data, certificates and the stones set in individual items.
@@ -39,21 +40,24 @@ public class GemstoneService implements StoneRegistry {
     private final StoneCertificateRepository certificateRepository;
     private final JewelleryStoneRepository stoneRepository;
     private final AuditService auditService;
+    private final CompanyScope companyScope;
 
     // ---------- gemstone master ----------
 
     @Transactional(readOnly = true)
     public List<GemstoneResponse> listGemstones() {
-        return gemstoneRepository.findAllByOrderByNameAsc().stream()
+        return gemstoneRepository.findAllInCompany(companyScope.currentOrNull()).stream()
                 .map(GemstoneResponse::from).toList();
     }
 
     @Transactional
     public GemstoneResponse createGemstone(GemstoneRequest request) {
-        if (gemstoneRepository.existsByCodeIgnoreCase(request.code())) {
+        UUID companyId = companyScope.resolveForCreate(request.companyId());
+        if (gemstoneRepository.existsByCompanyIdAndCodeIgnoreCase(companyId, request.code())) {
             throw new ConflictException("Gemstone code already exists: " + request.code());
         }
         Gemstone gemstone = new Gemstone();
+        gemstone.setCompanyId(companyId);
         applyGemstone(gemstone, request);
         Gemstone saved = gemstoneRepository.save(gemstone);
         auditService.record("GEMSTONE_CREATED", "Gemstone", saved.getId(), null,
@@ -63,7 +67,7 @@ public class GemstoneService implements StoneRegistry {
 
     @Transactional
     public GemstoneResponse updateGemstone(UUID id, GemstoneRequest request) {
-        Gemstone gemstone = gemstoneRepository.findById(id)
+        Gemstone gemstone = gemstoneRepository.findByIdInCompany(id, companyScope.currentOrNull())
                 .orElseThrow(() -> NotFoundException.of("Gemstone", id));
         GemstoneResponse before = GemstoneResponse.from(gemstone);
         applyGemstone(gemstone, request);
@@ -150,7 +154,7 @@ public class GemstoneService implements StoneRegistry {
     private JewelleryStone toEntity(UUID itemId, StoneSpec spec) {
         JewelleryStone stone = new JewelleryStone();
         stone.setJewelleryItemId(itemId);
-        stone.setGemstone(gemstoneRepository.findById(spec.gemstoneId())
+        stone.setGemstone(gemstoneRepository.findByIdInCompany(spec.gemstoneId(), companyScope.currentOrNull())
                 .orElseThrow(() -> NotFoundException.of("Gemstone", spec.gemstoneId())));
         if (spec.certificateId() != null) {
             stone.setCertificate(certificateRepository.findById(spec.certificateId())

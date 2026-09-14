@@ -180,13 +180,24 @@ public class ApprovalService {
         Pageable oldestFirst = PageRequest.of(0, FETCH_CAP, Sort.by("createdAt").ascending());
         Pageable capped = PageRequest.of(0, FETCH_CAP);
         return switch (type) {
-            case TRANSFER -> movementRepository
-                    .search(MovementStatus.PENDING_APPROVAL, null, null, null, null, null, oldestFirst)
-                    .getContent().stream()
-                    .filter(m -> branchId == null || branchId.equals(m.getToBranchId())
-                            || branchId.equals(m.getFromBranchId()))
-                    .map(this::transferRow)
-                    .toList();
+            case TRANSFER -> {
+                // Scoped in the query, not after it: with more pending transfers
+                // platform-wide than the cap, a post-filter could drop the oldest
+                // of this caller's branches while keeping other people's.
+                AuthenticatedUser user = SecurityUtils.requireCurrentUser();
+                if (branchId == null && !user.superAdmin() && user.branchIds().isEmpty()) {
+                    // No branches means nothing to approve, not everything.
+                    yield List.of();
+                }
+                Set<UUID> scope = branchId != null ? Set.of(branchId)
+                        : user.superAdmin() ? Set.of() : user.branchIds();
+                yield movementRepository
+                        .findPendingApprovalInBranches(SecurityUtils.currentCompanyIdOrNull(), scope,
+                                PageRequest.of(0, FETCH_CAP))
+                        .stream()
+                        .map(this::transferRow)
+                        .toList();
+            }
             case PURCHASE_ORDER -> orderRepository
                     .search(PurchaseOrderStatus.PENDING_APPROVAL, null, branchId, oldestFirst)
                     .getContent().stream().map(this::orderRow).toList();

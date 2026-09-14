@@ -3,6 +3,7 @@ package com.finotech.jewellery.modules.product.api.controller;
 import com.finotech.jewellery.modules.product.api.request.DesignRequest;
 import com.finotech.jewellery.modules.product.api.request.LinkImageRequest;
 import com.finotech.jewellery.modules.product.api.request.ProductRequest;
+import com.finotech.jewellery.modules.product.api.request.UpdateImageRequest;
 import com.finotech.jewellery.modules.product.api.response.DesignResponse;
 import com.finotech.jewellery.modules.product.api.response.ImageResponse;
 import com.finotech.jewellery.modules.product.api.response.ProductResponse;
@@ -96,6 +97,17 @@ public class ProductController {
                 .body(ApiResponse.ok(productService.addDesignImage(id, request)));
     }
 
+    @Operation(summary = "Set a design image as primary or change its display order",
+            description = "primaryImage=true promotes it and demotes the previous primary; "
+                    + "primaryImage=false demotes it and promotes the next in order.")
+    @PutMapping("/designs/{id}/images/{imageId}")
+    @PreAuthorize(UPDATE)
+    public ResponseEntity<ApiResponse<ImageResponse>> updateDesignImage(
+            @PathVariable UUID id, @PathVariable UUID imageId,
+            @Valid @RequestBody UpdateImageRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(productService.updateDesignImage(id, imageId, request)));
+    }
+
     @Operation(summary = "Unlink an image from a design",
             description = "The stored file itself is kept; only the link is removed.")
     @DeleteMapping("/designs/{id}/images/{imageId}")
@@ -160,6 +172,17 @@ public class ProductController {
             @PathVariable UUID id, @Valid @RequestBody LinkImageRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok(productService.addProductImage(id, request)));
+    }
+
+    @Operation(summary = "Set a product image as primary or change its display order",
+            description = "primaryImage=true promotes it and demotes the previous primary; "
+                    + "primaryImage=false demotes it and promotes the next in order.")
+    @PutMapping("/products/{id}/images/{imageId}")
+    @PreAuthorize(UPDATE)
+    public ResponseEntity<ApiResponse<ImageResponse>> updateProductImage(
+            @PathVariable UUID id, @PathVariable UUID imageId,
+            @Valid @RequestBody UpdateImageRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(productService.updateProductImage(id, imageId, request)));
     }
 
     @Operation(summary = "Unlink an image from a product",

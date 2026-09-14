@@ -13,5 +13,6 @@ public record DesignRequest(@NotBlank @Size(max = 50) String designCode,
                             UUID brandId,
                             @Size(max = 150) String designer,
                             @DecimalMin(value = "0.0", inclusive = false) BigDecimal nominalGrossWeight,
-                            String description) {
+                            String description,
+                            UUID companyId) {
 }

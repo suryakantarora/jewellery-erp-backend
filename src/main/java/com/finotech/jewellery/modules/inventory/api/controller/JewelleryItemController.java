@@ -7,6 +7,7 @@ import com.finotech.jewellery.modules.inventory.api.request.CreateItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.ReserveItemRequest;
 import com.finotech.jewellery.modules.inventory.api.request.ResolveTagsRequest;
 import com.finotech.jewellery.modules.inventory.api.request.TagItemRequest;
+import com.finotech.jewellery.modules.inventory.api.request.UpdateImageRequest;
 import com.finotech.jewellery.modules.inventory.api.request.UpdateItemRequest;
 import com.finotech.jewellery.modules.inventory.api.response.ItemImageResponse;
 import com.finotech.jewellery.modules.inventory.api.response.ItemPassportResponse;
@@ -170,6 +171,17 @@ public class JewelleryItemController {
             @PathVariable UUID id, @Valid @RequestBody LinkImageRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok(itemService.addImage(id, request)));
+    }
+
+    @Operation(summary = "Set a photograph as primary or change its display order",
+            description = "primaryImage=true promotes it and demotes the previous primary; "
+                    + "primaryImage=false demotes it and promotes the next in order.")
+    @PutMapping("/items/{id}/images/{imageId}")
+    @PreAuthorize(CREATE)
+    public ResponseEntity<ApiResponse<ItemImageResponse>> updateImage(
+            @PathVariable UUID id, @PathVariable UUID imageId,
+            @Valid @RequestBody UpdateImageRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(itemService.updateImage(id, imageId, request)));
     }
 
     @Operation(summary = "Unlink a photograph from the item",

@@ -15,5 +15,6 @@ public record CreateUserRequest(@NotBlank @Size(max = 100) String username,
                                 @Size(max = 50) String employeeCode,
                                 UUID primaryBranchId,
                                 @NotNull Set<UUID> roleIds,
-                                Set<UUID> branchIds) {
+                                Set<UUID> branchIds,
+                                UUID companyId) {
 }

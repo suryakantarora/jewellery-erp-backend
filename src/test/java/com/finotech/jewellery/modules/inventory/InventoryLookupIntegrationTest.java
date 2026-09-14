@@ -86,20 +86,22 @@ class InventoryLookupIntegrationTest extends IntegrationTestBase {
                 branchBId, null, "SHW" + unique, "Pakse Showroom", LocationType.SHOWROOM, false, null,
                 null)).id();
 
-        var metal = metalService.createMetal(new MetalRequest("MT" + unique, "Gold", "Au", "GRAM", null));
+        var metal = metalService.createMetal(new MetalRequest("MT" + unique, "Gold", "Au", "GRAM", null,
+                company.id()));
         var purity = metalService.createPurity(new PurityRequest(
                 metal.id(), "22K", "22 Karat", new BigDecimal("0.916700"), 1));
         var type = productMasterService.createProductType(new ProductTypeRequest(
                 "PT" + unique, "Ring", null, true, null));
         var design = productService.createDesign(new DesignRequest(
-                "DSG" + unique, "Lotus Band", type.id(), null, null, null, null, null));
+                "DSG" + unique, "Lotus Band", type.id(), null, null, null, null, null, company.id()));
         productId = productService.createProduct(new ProductRequest(
                 "SKU" + unique, "Lotus Ring", design.id(), type.id(), null, null, null,
                 metal.id(), purity.id(), new BigDecimal("10.000"), "PER_GRAM",
-                new BigDecimal("45000"), null, null, null)).id();
+                new BigDecimal("45000"), null, null, null, company.id())).id();
         supplierId = supplierService.create(new SupplierRequest(
                 "SUP" + unique, "Golden Hands Workshop", null, null, null, null, null, null,
-                null, null, "LAK", null, null, null)).id();
+                null, null, "LAK", null, null, null, company.id())).id();
+        TestSecurity.defaultCompany(company.id());
     }
 
     @AfterEach

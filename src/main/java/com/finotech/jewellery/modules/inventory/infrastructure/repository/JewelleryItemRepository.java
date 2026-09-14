@@ -55,13 +55,17 @@ public interface JewelleryItemRepository extends JpaRepository<JewelleryItem, UU
               and (:status is null or i.status = :status)
               and (:locationId is null or i.currentLocationId = :locationId)
               and (:branchId is null or i.currentBranchId = :branchId)
+              and (:companyId is null or i.currentBranchId in
+                   (select b.id from com.finotech.jewellery.modules.organization.domain.entity.Branch b
+                     where b.company.id = :companyId))
               and (:metalId is null or i.metalId = :metalId)
               and (:purityId is null or i.purityId = :purityId)
               and (:binId is null or i.binId = :binId)
               and (:minPrice is null or i.currentPrice >= :minPrice)
               and (:maxPrice is null or i.currentPrice <= :maxPrice)
             """)
-    Page<JewelleryItem> search(@Param("search") String search,
+    Page<JewelleryItem> search(@Param("companyId") UUID companyId,
+                               @Param("search") String search,
                                @Param("productId") UUID productId,
                                @Param("status") ItemStatus status,
                                @Param("locationId") UUID locationId,

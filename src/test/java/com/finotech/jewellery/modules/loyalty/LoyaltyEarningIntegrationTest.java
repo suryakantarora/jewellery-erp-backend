@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.finotech.jewellery.IntegrationTestBase;
 import com.finotech.jewellery.TestSecurity;
 import com.finotech.jewellery.modules.customer.api.request.CustomerRequest;
+import com.finotech.jewellery.modules.organization.api.request.CompanyRequest;
+import com.finotech.jewellery.modules.organization.application.service.OrganizationService;
 import com.finotech.jewellery.modules.customer.application.service.CustomerService;
 import com.finotech.jewellery.modules.loyalty.api.request.LoyaltyRequests;
 import com.finotech.jewellery.modules.loyalty.application.service.LoyaltyService;
@@ -27,9 +29,16 @@ class LoyaltyEarningIntegrationTest extends IntegrationTestBase {
     @Autowired private LoyaltyService loyaltyService;
     @Autowired private CustomerService customerService;
 
+    @Autowired private OrganizationService organizationService;
+
+    private UUID companyId;
+
     @BeforeEach
     void authenticate() {
         TestSecurity.authenticateAsSuperAdmin();
+        String tag = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        companyId = organizationService.createCompany(new CompanyRequest(
+                "CO" + tag, "Test Co", null, null, null, "LAK", null, null, null, null, null)).id();
     }
 
     @AfterEach
@@ -128,6 +137,6 @@ class LoyaltyEarningIntegrationTest extends IntegrationTestBase {
     private UUID newCustomer() {
         String phone = "+856" + (System.nanoTime() % 1_000_000_000L);
         return customerService.create(new CustomerRequest(null, null, "Loyalty Test", null,
-                phone, null, null, null, null, null, null, null, null)).id();
+                phone, null, null, null, null, null, null, null, null, companyId)).id();
     }
 }

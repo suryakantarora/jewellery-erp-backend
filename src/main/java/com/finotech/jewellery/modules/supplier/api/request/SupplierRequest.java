@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
+import java.util.UUID;
 
 public record SupplierRequest(@NotBlank @Size(max = 30) String code,
                               @NotBlank @Size(max = 200) String name,
@@ -20,5 +21,6 @@ public record SupplierRequest(@NotBlank @Size(max = 30) String code,
                               @Size(min = 3, max = 3) String currency,
                               @PositiveOrZero Integer paymentTermsDays,
                               @DecimalMin("0.0") BigDecimal creditLimit,
-                              @Size(max = 500) String notes) {
+                              @Size(max = 500) String notes,
+                              UUID companyId) {
 }

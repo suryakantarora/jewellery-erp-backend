@@ -54,7 +54,8 @@ class InventoryConcurrencyIntegrationTest extends IntegrationTestBase {
         locationId = organizationService.createLocation(new LocationRequest(
                 branch.id(), null, "LOC" + unique, "Showroom", LocationType.SHOWROOM, false, null, null)).id();
 
-        var metal = metalService.createMetal(new MetalRequest("MT" + unique, "Gold", "Au", "GRAM", null));
+        var metal = metalService.createMetal(new MetalRequest("MT" + unique, "Gold", "Au", "GRAM", null,
+                company.id()));
         var purity = metalService.createPurity(new PurityRequest(
                 metal.id(), "22K", "22 Karat", new BigDecimal("0.916700"), 1));
         var type = productMasterService.createProductType(new ProductTypeRequest(
@@ -62,7 +63,7 @@ class InventoryConcurrencyIntegrationTest extends IntegrationTestBase {
         productId = productService.createProduct(new ProductRequest(
                 "SKU" + unique, "Test Ring", null, type.id(), null, null, null,
                 metal.id(), purity.id(), new BigDecimal("10.000"), "PER_GRAM",
-                new BigDecimal("45000"), null, null, null)).id();
+                new BigDecimal("45000"), null, null, null, company.id())).id();
     }
 
     @Test

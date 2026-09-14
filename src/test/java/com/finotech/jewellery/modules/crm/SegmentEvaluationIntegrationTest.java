@@ -8,6 +8,8 @@ import com.finotech.jewellery.TestSecurity;
 import com.finotech.jewellery.modules.crm.api.request.CrmRequests;
 import com.finotech.jewellery.modules.crm.application.service.SegmentService;
 import com.finotech.jewellery.modules.customer.api.request.CustomerRequest;
+import com.finotech.jewellery.modules.organization.api.request.CompanyRequest;
+import com.finotech.jewellery.modules.organization.application.service.OrganizationService;
 import com.finotech.jewellery.modules.customer.application.service.CustomerService;
 import com.finotech.jewellery.modules.loyalty.application.service.LoyaltyService;
 import com.finotech.jewellery.shared.exception.ValidationException;
@@ -32,9 +34,16 @@ class SegmentEvaluationIntegrationTest extends IntegrationTestBase {
     @Autowired private CustomerService customerService;
     @Autowired private LoyaltyService loyaltyService;
 
+    @Autowired private OrganizationService organizationService;
+
+    private UUID companyId;
+
     @BeforeEach
     void authenticate() {
         TestSecurity.authenticateAsSuperAdmin();
+        String tag = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        companyId = organizationService.createCompany(new CompanyRequest(
+                "CO" + tag, "Test Co", null, null, null, "LAK", null, null, null, null, null)).id();
     }
 
     @AfterEach
@@ -115,7 +124,7 @@ class SegmentEvaluationIntegrationTest extends IntegrationTestBase {
     private UUID customerBornOn(LocalDate dateOfBirth) {
         String phone = "+856" + (System.nanoTime() % 1_000_000_000L);
         return customerService.create(new CustomerRequest(null, null, "Segment Test", null,
-                phone, null, null, dateOfBirth, null, null, null, null, null)).id();
+                phone, null, null, dateOfBirth, null, null, null, null, null, companyId)).id();
     }
 
     private String unique(String prefix) {

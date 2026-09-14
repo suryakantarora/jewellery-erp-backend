@@ -25,6 +25,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.finotech.jewellery.modules.organization.application.CompanyScope;
 
 /**
  * Lookup master data: categories, product types, brands, collections and sizes.
@@ -39,19 +40,23 @@ public class ProductMasterService {
     private final CollectionRepository collectionRepository;
     private final SizeRepository sizeRepository;
     private final AuditService auditService;
+    private final CompanyScope companyScope;
 
     // ---------- category ----------
 
     @Transactional(readOnly = true)
     public List<MasterResponse> listCategories() {
-        return categoryRepository.findAllByOrderByDisplayOrderAscNameAsc().stream()
+        return categoryRepository.findAllInCompany(companyScope.currentOrNull()).stream()
                 .map(MasterResponse::from).toList();
     }
 
     @Transactional
     public MasterResponse createCategory(CategoryRequest request) {
-        requireUniqueCode(categoryRepository.existsByCodeIgnoreCase(request.code()), "Category", request.code());
+        UUID companyId = companyScope.resolveForCreate(request.companyId());
+        requireUniqueCode(categoryRepository.existsByCompanyIdAndCodeIgnoreCase(companyId, request.code()),
+                "Category", request.code());
         ProductCategory category = new ProductCategory();
+        category.setCompanyId(companyId);
         applyCategory(category, request, null);
         ProductCategory saved = categoryRepository.save(category);
         auditService.record("CATEGORY_CREATED", "ProductCategory", saved.getId(), null,
@@ -61,8 +66,7 @@ public class ProductMasterService {
 
     @Transactional
     public MasterResponse updateCategory(UUID id, CategoryRequest request) {
-        ProductCategory category = categoryRepository.findById(id)
-                .orElseThrow(() -> NotFoundException.of("ProductCategory", id));
+        ProductCategory category = requireCategory(id);
         MasterResponse before = MasterResponse.from(category);
         applyCategory(category, request, id);
         MasterResponse after = MasterResponse.from(category);
@@ -179,8 +183,11 @@ public class ProductMasterService {
             if (request.parentId().equals(selfId)) {
                 throw new ValidationException("A category cannot be its own parent");
             }
-            category.setParent(categoryRepository.findById(request.parentId())
-                    .orElseThrow(() -> NotFoundException.of("ProductCategory", request.parentId())));
+            ProductCategory parent = requireCategory(request.parentId());
+            if (!parent.getCompanyId().equals(category.getCompanyId())) {
+                throw NotFoundException.of("ProductCategory", request.parentId());
+            }
+            category.setParent(parent);
         } else {
             category.setParent(null);
         }
@@ -191,9 +198,12 @@ public class ProductMasterService {
         type.setName(request.name().trim());
         type.setSizeable(request.sizeable());
         type.setDescription(request.description());
-        type.setCategory(request.categoryId() == null ? null
-                : categoryRepository.findById(request.categoryId())
-                        .orElseThrow(() -> NotFoundException.of("ProductCategory", request.categoryId())));
+        type.setCategory(request.categoryId() == null ? null : requireCategory(request.categoryId()));
+    }
+
+    private ProductCategory requireCategory(UUID id) {
+        return categoryRepository.findByIdInCompany(id, companyScope.currentOrNull())
+                .orElseThrow(() -> NotFoundException.of("ProductCategory", id));
     }
 
     private void requireUniqueCode(boolean exists, String entity, String code) {

@@ -29,6 +29,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import com.finotech.jewellery.modules.organization.application.CompanyScope;
 
 /**
  * Customer master data, addresses, documents, preferences and KYC state.
@@ -39,12 +40,14 @@ public class CustomerService implements CustomerDirectory {
 
     private final CustomerRepository customerRepository;
     private final AuditService auditService;
+    private final CompanyScope companyScope;
 
     @Transactional(readOnly = true)
     public PageResponse<CustomerResponse> search(String search, CustomerStatus status,
                                                  KycStatus kycStatus, UUID branchId,
                                                  Pageable pageable) {
-        return PageResponse.of(customerRepository.search(search, status, kycStatus, branchId, pageable),
+        return PageResponse.of(customerRepository.search(companyScope.currentOrNull(), search, status,
+                        kycStatus, branchId, pageable),
                 CustomerResponse::summary);
     }
 
@@ -56,25 +59,34 @@ public class CustomerService implements CustomerDirectory {
     /** Counter staff usually identify a walk-in customer by phone number. */
     @Transactional(readOnly = true)
     public CustomerResponse findByPhone(String phone) {
-        return customerRepository.findByPhone(phone)
+        return customerRepository.findByPhoneInCompany(phone, companyScope.currentOrNull())
                 .map(CustomerResponse::summary)
                 .orElseThrow(() -> new NotFoundException("No customer with phone " + phone));
     }
 
     @Transactional
     public CustomerResponse create(CustomerRequest request) {
-        if (customerRepository.existsByPhone(request.phone().trim())) {
+        // The registered branch, where given, says which company the customer
+        // belongs to; it must agree with whatever the request or caller says.
+        UUID companyId = request.registeredBranchId() != null && request.companyId() == null
+                ? companyScope.resolveForCreate(companyScope.requireCompanyOfBranch(request.registeredBranchId()))
+                : companyScope.resolveForCreate(request.companyId());
+        if (request.registeredBranchId() != null) {
+            companyScope.requireBranchInCompany(request.registeredBranchId(), companyId);
+        }
+        if (customerRepository.existsByCompanyIdAndPhone(companyId, request.phone().trim())) {
             throw new ConflictException("A customer with phone " + request.phone()
                     + " already exists");
         }
         String code = StringUtils.hasText(request.customerCode())
                 ? request.customerCode().trim().toUpperCase()
-                : uniqueCustomerCode();
-        if (customerRepository.existsByCustomerCodeIgnoreCase(code)) {
+                : uniqueCustomerCode(companyId);
+        if (customerRepository.existsByCompanyIdAndCustomerCodeIgnoreCase(companyId, code)) {
             throw new ConflictException("Customer code already exists: " + code);
         }
 
         Customer customer = new Customer();
+        customer.setCompanyId(companyId);
         customer.setCustomerCode(code);
         apply(customer, request);
 
@@ -90,8 +102,11 @@ public class CustomerService implements CustomerDirectory {
         CustomerResponse before = CustomerResponse.summary(customer);
 
         if (!customer.getPhone().equals(request.phone().trim())
-                && customerRepository.existsByPhone(request.phone().trim())) {
+                && customerRepository.existsByCompanyIdAndPhone(customer.getCompanyId(), request.phone().trim())) {
             throw new ConflictException("Another customer already uses phone " + request.phone());
+        }
+        if (request.registeredBranchId() != null) {
+            companyScope.requireBranchInCompany(request.registeredBranchId(), customer.getCompanyId());
         }
         apply(customer, request);
 
@@ -226,19 +241,25 @@ public class CustomerService implements CustomerDirectory {
     @Transactional(readOnly = true)
     public java.util.List<CustomerView> findSegmentCandidates(UUID branchId,
                                                               Integer birthdayMonth) {
-        return customerRepository.findSegmentCandidates(branchId, birthdayMonth).stream()
+        return customerRepository.findSegmentCandidates(companyScope.currentOrNull(), branchId, birthdayMonth)
+                .stream()
                 .map(this::toView)
                 .toList();
     }
 
     // ---------- helpers ----------
 
+    /** Another company's customer is reported as absent, never as forbidden. */
     private Customer requireCustomerEntity(UUID id) {
-        return customerRepository.findById(id).orElseThrow(() -> NotFoundException.of("Customer", id));
+        return customerRepository.findByIdInCompany(id, companyScope.currentOrNull())
+                .orElseThrow(() -> NotFoundException.of("Customer", id));
     }
 
     private Customer requireWithDetails(UUID id) {
-        return customerRepository.findWithDetailsById(id)
+        UUID scope = companyScope.currentOrNull();
+        return (scope == null
+                ? customerRepository.findWithDetailsById(id)
+                : customerRepository.findWithDetailsByIdAndCompanyId(id, scope))
                 .orElseThrow(() -> NotFoundException.of("Customer", id));
     }
 
@@ -263,10 +284,10 @@ public class CustomerService implements CustomerDirectory {
         customer.setNotes(request.notes());
     }
 
-    private String uniqueCustomerCode() {
+    private String uniqueCustomerCode(UUID companyId) {
         for (int attempt = 0; attempt < 5; attempt++) {
             String candidate = "CUS-" + CodeGenerator.random(8);
-            if (!customerRepository.existsByCustomerCodeIgnoreCase(candidate)) {
+            if (!customerRepository.existsByCompanyIdAndCustomerCodeIgnoreCase(companyId, candidate)) {
                 return candidate;
             }
         }

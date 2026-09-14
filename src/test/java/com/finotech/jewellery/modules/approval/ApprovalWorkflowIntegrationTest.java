@@ -18,7 +18,6 @@ import com.finotech.jewellery.modules.inventory.application.service.InventoryMov
 import com.finotech.jewellery.modules.inventory.domain.enums.MovementStatus;
 import com.finotech.jewellery.modules.inventory.domain.enums.MovementType;
 import com.finotech.jewellery.modules.organization.api.request.BranchRequest;
-import com.finotech.jewellery.modules.organization.api.request.CompanyRequest;
 import com.finotech.jewellery.modules.organization.api.request.LocationRequest;
 import com.finotech.jewellery.modules.organization.application.service.OrganizationService;
 import com.finotech.jewellery.modules.organization.domain.enums.LocationType;
@@ -68,10 +67,9 @@ class ApprovalWorkflowIntegrationTest extends IntegrationTestBase {
         world = fixture.create(new BigDecimal("2000000"), new BigDecimal("50000"),
                 new BigDecimal("2.0"), null);
         String tag = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-        var company = organizationService.createCompany(new CompanyRequest(
-                "CO" + tag, "Other Co", null, null, null, "LAK", null, null, null, null, null));
+        // A second branch of the same company: a grant cannot span companies.
         otherBranchId = organizationService.createBranch(new BranchRequest(
-                company.id(), "BR" + tag, "Other Branch", false, null, null, null, null, null, null)).id();
+                world.companyId(), "BR" + tag, "Other Branch", false, null, null, null, null, null, null)).id();
         otherLocationId = organizationService.createLocation(new LocationRequest(
                 otherBranchId, null, "LOC" + tag, "Other Showroom", LocationType.SHOWROOM, false,
                 null, null)).id();
@@ -243,5 +241,32 @@ class ApprovalWorkflowIntegrationTest extends IntegrationTestBase {
         assertThat(rejected.status()).isEqualTo("REJECTED");
         assertThat(discountRequestService.get(discountId).decisionNote())
                 .isEqualTo("Margin too thin this month");
+    }
+
+    @Test
+    @DisplayName("a pending transfer in a foreign branch is not listed, even before any cap applies")
+    void foreignBranchTransferIsNotListed() {
+        UUID transferId = pendingTransfer();
+        String tag = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        UUID foreignBranchId = organizationService.createBranch(new BranchRequest(
+                world.companyId(), "FB" + tag, "Foreign Branch", false, null, null, null, null, null, null)).id();
+
+        // Approver of a branch the transfer neither leaves nor enters.
+        TestSecurity.authenticateAs(APPROVER_PERMS, Set.of(foreignBranchId));
+        assertThat(approvalService.pending(null, ApprovalType.TRANSFER))
+                .extracting(ApprovalItemResponse::id)
+                .doesNotContain(transferId);
+
+        // The source branch alone does not make it theirs to decide either.
+        TestSecurity.authenticateAs(APPROVER_PERMS, Set.of(world.branchId()));
+        assertThat(approvalService.pending(null, ApprovalType.TRANSFER))
+                .extracting(ApprovalItemResponse::id)
+                .doesNotContain(transferId);
+
+        // The destination branch does.
+        TestSecurity.authenticateAs(APPROVER_PERMS, Set.of(otherBranchId));
+        assertThat(approvalService.pending(null, ApprovalType.TRANSFER))
+                .extracting(ApprovalItemResponse::id)
+                .contains(transferId);
     }
 }
