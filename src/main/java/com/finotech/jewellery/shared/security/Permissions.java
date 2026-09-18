@@ -99,4 +99,6 @@ public final class Permissions {
 
     /** Convenience for {@code @PreAuthorize("hasAuthority(...)")} expressions. */
     public static final String HAS = "hasAuthority";
+    public static final String STOREFRONT_VIEW = "STOREFRONT_VIEW";
+    public static final String STOREFRONT_MANAGE = "STOREFRONT_MANAGE";
 }

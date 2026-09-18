@@ -2,6 +2,7 @@ package com.finotech.jewellery.shared.config;
 
 import com.finotech.jewellery.shared.exception.ApiError;
 import com.finotech.jewellery.shared.exception.ErrorCode;
+import com.finotech.jewellery.shared.security.AuthenticatedCustomer;
 import com.finotech.jewellery.shared.security.BranchContextFilter;
 import com.finotech.jewellery.shared.security.JwtAuthenticationFilter;
 import com.finotech.jewellery.shared.security.SecurityProperties;
@@ -11,6 +12,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.authorization.AuthorizationDecision;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -44,7 +48,19 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(publicPaths).permitAll()
-                        .anyRequest().authenticated())
+                        // The customer app: its own principal, and nothing else.
+                        .requestMatchers("/api/v1/storefront/**")
+                                .hasAuthority(AuthenticatedCustomer.AUTHORITY)
+                        // Everything else is staff-only. A customer token is a
+                        // valid signature but not a user, so it is refused here
+                        // rather than left to each endpoint's @PreAuthorize.
+                        .anyRequest().access((authentication, context) -> {
+                            Authentication current = authentication.get();
+                            return new AuthorizationDecision(current != null
+                                    && current.isAuthenticated()
+                                    && !(current instanceof AnonymousAuthenticationToken)
+                                    && !(current.getPrincipal() instanceof AuthenticatedCustomer));
+                        }))
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((request, response, authException) ->
                                 write(response, ErrorCode.UNAUTHORIZED, "Authentication required",

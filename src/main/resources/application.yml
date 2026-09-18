@@ -58,6 +58,10 @@ jewellery:
       - /actuator/health/**
       # The forced-update gate runs before login, so it must be reachable anonymously.
       - /api/v1/app/version
+      # The customer app: branding, catalogue and content are anonymous, and
+      # sign-in has to be reachable before there is a token.
+      - /api/v1/public/**
+      - /api/v1/customer-auth/**
   app:
     # Mobile app version gate: GET /api/v1/app/version. A client older than
     # min-supported is told to update before it can continue. Store URLs are
@@ -86,6 +90,18 @@ jewellery:
       - image/png
       - image/webp
       - application/pdf
+  storefront:
+    # Customer app. A fixed OTP code is for development and store-review
+    # accounts only: when set, no SMS is sent and that code always verifies.
+    otp:
+      length: 6
+      ttl-seconds: ${STOREFRONT_OTP_TTL_SECONDS:300}
+      resend-seconds: ${STOREFRONT_OTP_RESEND_SECONDS:30}
+      max-attempts: ${STOREFRONT_OTP_MAX_ATTEMPTS:5}
+      fixed-code: ${STOREFRONT_OTP_FIXED_CODE:}
+    customer-token-days: ${STOREFRONT_CUSTOMER_TOKEN_DAYS:90}
+    catalogue-cache-seconds: ${STOREFRONT_CATALOGUE_CACHE_SECONDS:60}
+    bootstrap-tenant-key: ${STOREFRONT_BOOTSTRAP_TENANT_KEY:}
   compliance:
     # Reporting thresholds. Jurisdictions differ and limits change, so these are
     # configuration rather than constants.

@@ -15,6 +15,12 @@ jewellery:
   security:
     jwt:
       secret: ${JWT_SECRET:local-development-only-secret-key-change-me-please-0123456789}
+  storefront:
+    # Local only: every OTP is 123456, and the single company answers to the
+    # key the customer app ships with.
+    otp:
+      fixed-code: ${STOREFRONT_OTP_FIXED_CODE:123456}
+    bootstrap-tenant-key: ${STOREFRONT_BOOTSTRAP_TENANT_KEY:fino}
 
 logging:
   level:
